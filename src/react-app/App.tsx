@@ -9,6 +9,7 @@ import { KidMappings } from "./pages/KidMappings";
 import { Audit } from "./pages/Audit";
 import { Onboard } from "./pages/Onboard";
 import { Cron } from "./pages/Cron";
+import { Docs } from "./pages/Docs";
 import { ApiError, api } from "./lib/api";
 
 function readHash(): string {
@@ -49,6 +50,7 @@ function App() {
 			{page === "kid-mappings" && <KidMappings />}
 			{page === "onboard" && <Onboard />}
 			{page === "cron" && <Cron />}
+			{page === "docs" && <Docs />}
 			{page === "audit" && <Audit />}
 		</Layout>
 	);

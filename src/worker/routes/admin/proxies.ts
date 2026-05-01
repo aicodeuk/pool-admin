@@ -3,6 +3,7 @@ import { all, exec, one, run } from "../../lib/db";
 import { audit } from "../../lib/audit";
 import { nowDateTime } from "../../lib/time";
 import type { ProxyRow } from "../../lib/types";
+import { proxyFetch } from "../../lib/proxy-fetch";
 
 export const proxyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -71,4 +72,51 @@ proxyRoutes.delete("/:id{[0-9]+}", async (c) => {
 	await run(c.env.DB, `DELETE FROM proxies WHERE id = ?`, id);
 	await audit(c.env.DB, "proxy.delete", { type: "proxy", id }, null);
 	return c.json({ ok: true });
+});
+
+const IP_CHECK_URL = "https://ipinfo.io/json";
+
+proxyRoutes.post("/:id{[0-9]+}/test", async (c) => {
+	const id = Number(c.req.param("id"));
+	const row = await one<ProxyRow>(c.env.DB, `SELECT * FROM proxies WHERE id = ?`, id);
+	if (!row) return c.json({ error: "not found" }, 404);
+
+	const proxy = {
+		host: row.host,
+		port: row.port,
+		username: row.username,
+		password: row.password,
+		scheme: row.scheme as "http" | "socks5",
+	};
+
+	const t0 = Date.now();
+	let resp: Response;
+	try {
+		resp = await proxyFetch(c.env, IP_CHECK_URL, proxy);
+	} catch (e) {
+		return c.json({ ok: false, error: (e as Error).message });
+	}
+	const latency_ms = Date.now() - t0;
+
+	if (!resp.ok) {
+		return c.json({ ok: false, error: `HTTP ${resp.status}`, latency_ms });
+	}
+
+	let info: Record<string, string> = {};
+	try {
+		info = await resp.json() as Record<string, string>;
+	} catch {
+		return c.json({ ok: false, error: "non-JSON response", latency_ms });
+	}
+
+	return c.json({
+		ok: true,
+		ip: info.ip ?? "",
+		city: info.city ?? "",
+		region: info.region ?? "",
+		country: info.country ?? "",
+		org: info.org ?? "",
+		timezone: info.timezone ?? "",
+		latency_ms,
+	});
 });
