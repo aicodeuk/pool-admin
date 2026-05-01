@@ -74,7 +74,8 @@ proxyRoutes.delete("/:id{[0-9]+}", async (c) => {
 	return c.json({ ok: true });
 });
 
-const IP_CHECK_URL = "https://ipinfo.io/json";
+// ipwho.is: free, no auth, returns rich geo info, reliable from CF Workers
+const IP_CHECK_URL = "https://ipwho.is/";
 
 proxyRoutes.post("/:id{[0-9]+}/test", async (c) => {
 	const id = Number(c.req.param("id"));
@@ -92,31 +93,35 @@ proxyRoutes.post("/:id{[0-9]+}/test", async (c) => {
 	const t0 = Date.now();
 	let resp: Response;
 	try {
-		resp = await proxyFetch(c.env, IP_CHECK_URL, proxy);
+		resp = await proxyFetch(c.env, new Request(IP_CHECK_URL, {
+			headers: { "Accept": "application/json", "User-Agent": "curl/8.0" },
+		}), proxy);
 	} catch (e) {
 		return c.json({ ok: false, error: (e as Error).message });
 	}
 	const latency_ms = Date.now() - t0;
 
 	if (!resp.ok) {
-		return c.json({ ok: false, error: `HTTP ${resp.status}`, latency_ms });
+		const body = await resp.text().catch(() => "");
+		return c.json({ ok: false, error: `HTTP ${resp.status}`, detail: body.slice(0, 200), latency_ms });
 	}
 
-	let info: Record<string, string> = {};
+	let raw: Record<string, unknown> = {};
 	try {
-		info = await resp.json() as Record<string, string>;
+		raw = await resp.json() as Record<string, unknown>;
 	} catch {
 		return c.json({ ok: false, error: "non-JSON response", latency_ms });
 	}
 
+	// ipwho.is returns { ip, country, country_code, city, region, connection: { org, isp } }
+	const conn = (raw.connection ?? {}) as Record<string, string>;
 	return c.json({
 		ok: true,
-		ip: info.ip ?? "",
-		city: info.city ?? "",
-		region: info.region ?? "",
-		country: info.country ?? "",
-		org: info.org ?? "",
-		timezone: info.timezone ?? "",
+		ip: String(raw.ip ?? ""),
+		city: String(raw.city ?? ""),
+		region: String(raw.region ?? ""),
+		country: String(raw.country_code ?? raw.country ?? ""),
+		org: String(conn.org ?? conn.isp ?? ""),
 		latency_ms,
 	});
 });
