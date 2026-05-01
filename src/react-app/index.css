@@ -124,3 +124,8 @@ tr:hover td { background: #fafbfc; }
 
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 .field label { font-size: 12px; color: #6b7280; }
+
+.tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 2px solid #e5e7eb; }
+.tabs button { border: none; border-radius: 0; background: transparent; padding: 8px 18px; color: #6b7280; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+.tabs button:hover { color: #1f2937; border-color: transparent; }
+.tabs button.active { color: #2563eb; border-bottom: 2px solid #2563eb; }

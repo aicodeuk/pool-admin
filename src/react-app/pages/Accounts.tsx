@@ -27,6 +27,8 @@ export function Accounts() {
 	const [filters, setFilters] = useState({ provider: "claude", status: "", q: "" });
 	const [loading, setLoading] = useState(false);
 	const [editing, setEditing] = useState<Account | null>(null);
+	const [testing, setTesting] = useState<number | null>(null);
+	const [testResult, setTestResult] = useState<{ id: number; ok: boolean; reason: string | null } | null>(null);
 
 	const reload = useCallback(async () => {
 		setLoading(true);
@@ -69,6 +71,20 @@ export function Accounts() {
 		reload();
 	}
 
+	async function testAccount(id: number) {
+		setTesting(id);
+		setTestResult(null);
+		try {
+			const r = await api.post<{ ok: boolean; status: string; status_reason: string | null }>(`/api/admin/accounts/${id}/test`);
+			setTestResult({ id, ok: r.ok, reason: r.status_reason });
+			reload();
+		} catch (e) {
+			setTestResult({ id, ok: false, reason: (e as Error).message });
+		} finally {
+			setTesting(null);
+		}
+	}
+
 	return (
 		<>
 			<h2>账号管理 ({total})</h2>
@@ -93,6 +109,15 @@ export function Accounts() {
 				/>
 				<button onClick={reload} disabled={loading}>刷新</button>
 			</div>
+
+			{testResult && (
+				<div style={{ padding: "8px 12px", marginBottom: 12, borderRadius: 6, border: "1px solid", fontSize: 13, background: testResult.ok ? "#ecfdf5" : "#fef2f2", borderColor: testResult.ok ? "#6ee7b7" : "#fca5a5" }}>
+					{testResult.ok
+						? `✓ #${testResult.id} 探活成功 → active`
+						: `✗ #${testResult.id} 探活失败${testResult.reason ? `：${testResult.reason}` : ""}`}
+					<button className="ghost" style={{ marginLeft: 8, padding: "2px 6px", fontSize: 11 }} onClick={() => setTestResult(null)}>✕</button>
+				</div>
+			)}
 
 			<div className="card" style={{ padding: 0, overflow: "auto" }}>
 				<table>
@@ -122,6 +147,9 @@ export function Accounts() {
 								<td>
 									<div className="row" style={{ gap: 4 }}>
 										<button className="ghost" onClick={() => setEditing(a)}>编辑</button>
+										<button className="ghost" onClick={() => testAccount(a.id)} disabled={testing === a.id} title="发送探活请求，成功→active，失败→problem">
+											{testing === a.id ? "…" : "探活"}
+										</button>
 										{a.status === "problem" && <button className="ghost" onClick={() => clearProblem(a.id)}>恢复</button>}
 										<button className="ghost" onClick={() => patch(a.id, { status: a.status === "paused" ? "active" : "paused" })}>{a.status === "paused" ? "启用" : "停用"}</button>
 										<button className="ghost" onClick={() => resetUsed(a.id)}>重置</button>

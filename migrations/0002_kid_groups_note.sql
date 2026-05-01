@@ -1,0 +1,1 @@
+ALTER TABLE kid_groups ADD COLUMN note TEXT;

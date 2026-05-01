@@ -9,11 +9,13 @@ import { kidGroupRoutes } from "./routes/admin/kid-groups";
 import { kidMappingRoutes } from "./routes/admin/kid-mappings";
 import { auditRoutes } from "./routes/admin/audit";
 import { onboardRoutes } from "./routes/admin/onboard";
+import { cronRoutes } from "./routes/admin/cron";
 import { claudeSync, geminiSync, gptSync } from "./routes/v2/sync";
 
 import { refreshExpiringTokens } from "./cron/token-refresh";
 import { syncUsage } from "./cron/usage-sync";
 import { syncStatus } from "./cron/status-sync";
+import { runJob } from "./cron/log";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -33,6 +35,7 @@ admin.route("/kid-groups", kidGroupRoutes);
 admin.route("/kid-mappings", kidMappingRoutes);
 admin.route("/audit", auditRoutes);
 admin.route("/onboard", onboardRoutes);
+admin.route("/cron", cronRoutes);
 app.route("/api/admin", admin);
 
 // V2 sync API (signed, wire-compatible with the original Go service)
@@ -48,11 +51,11 @@ export default {
 			(async () => {
 				try {
 					if (cron === "* * * * *") {
-						await syncStatus(env);
+						await runJob(env, "status_sync", () => syncStatus(env));
 					} else if (cron === "*/10 * * * *") {
-						await refreshExpiringTokens(env);
+						await runJob(env, "token_refresh", () => refreshExpiringTokens(env));
 					} else if (cron === "*/30 * * * *") {
-						await syncUsage(env);
+						await runJob(env, "usage_sync", () => syncUsage(env));
 					}
 				} catch (e) {
 					console.error(`cron ${cron} failed:`, e);

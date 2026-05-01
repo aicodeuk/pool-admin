@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 
-interface Row { kid: number; group_name: string; updated_at: string; }
+interface Row { kid: number; group_name: string; note: string | null; updated_at: string; }
 
 function kindOf(name: string): string {
 	if (name.startsWith("channel_")) return "channel";
@@ -12,7 +12,7 @@ function kindOf(name: string): string {
 export function KidGroups() {
 	const [items, setItems] = useState<Row[]>([]);
 	const [adding, setAdding] = useState(false);
-	const [form, setForm] = useState({ kid: "", group_name: "" });
+	const [form, setForm] = useState({ kid: "", group_name: "", note: "" });
 
 	async function reload() {
 		const a = await api.get<{ items: Row[] }>("/api/admin/kid-groups");
@@ -23,8 +23,8 @@ export function KidGroups() {
 	async function save() {
 		const kid = Number(form.kid);
 		if (!Number.isFinite(kid) || !form.group_name.trim()) return;
-		await api.put(`/api/admin/kid-groups/${kid}`, { group_name: form.group_name.trim() });
-		setForm({ kid: "", group_name: "" });
+		await api.put(`/api/admin/kid-groups/${kid}`, { group_name: form.group_name.trim(), note: form.note.trim() || undefined });
+		setForm({ kid: "", group_name: "", note: "" });
 		setAdding(false);
 		reload();
 	}
@@ -46,13 +46,14 @@ export function KidGroups() {
 			</div>
 			<div className="card" style={{ padding: 0 }}>
 				<table>
-					<thead><tr><th>kid</th><th>组</th><th>类型</th><th>更新时间</th><th>操作</th></tr></thead>
+					<thead><tr><th>kid</th><th>组</th><th>类型</th><th>备注</th><th>更新时间</th><th>操作</th></tr></thead>
 					<tbody>
 						{items.map((r) => (
 							<tr key={r.kid}>
 								<td>{r.kid}</td>
 								<td className="mono">{r.group_name}</td>
 								<td><span className={`badge ${kindOf(r.group_name)}`}>{kindOf(r.group_name)}</span></td>
+								<td className="muted">{r.note ?? "—"}</td>
 								<td className="mono">{r.updated_at}</td>
 								<td><button className="ghost danger" onClick={() => remove(r.kid)}>解绑</button></td>
 							</tr>
@@ -81,6 +82,14 @@ export function KidGroups() {
 									类型：{kindOf(form.group_name)}
 								</span>
 							)}
+						</div>
+						<div className="field">
+							<label>备注（可选）</label>
+							<input
+								value={form.note}
+								onChange={(e) => setForm({ ...form, note: e.target.value })}
+								placeholder="别名或用途说明"
+							/>
 						</div>
 						<div className="row" style={{ justifyContent: "flex-end" }}>
 							<button onClick={() => setAdding(false)}>取消</button>

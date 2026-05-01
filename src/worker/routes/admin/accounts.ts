@@ -3,6 +3,8 @@ import { all, exec, one, run } from "../../lib/db";
 import { audit } from "../../lib/audit";
 import { addDays, nowDate, nowDateTime } from "../../lib/time";
 import type { AccountRow, AccountStatus, Provider } from "../../lib/types";
+import { proxyFetch } from "../../lib/proxy-fetch";
+import type { ProxyConfig } from "../../lib/proxy-fetch";
 
 export const accountRoutes = new Hono<{ Bindings: Env }>();
 
@@ -94,7 +96,7 @@ accountRoutes.post("/", async (c) => {
 		body.account_level ?? 1,
 		body.group_name ?? null,
 		body.user_id ?? null,
-		body.multiplier ?? 1.0,
+		body.multiplier ?? 4.0,
 		body.tier ?? "pro",
 		body.total_capacity ?? 10,
 		body.status ?? "active",
@@ -171,4 +173,95 @@ accountRoutes.post("/:id{[0-9]+}/reset-used", async (c) => {
 	await run(c.env.DB, `DELETE FROM kid_mappings WHERE account_id = ?`, id);
 	await audit(c.env.DB, "account.reset_used", { type: "account", id }, null);
 	return c.json({ ok: true });
+});
+
+type AccountWithProxy = AccountRow & {
+	proxy_host: string | null;
+	proxy_port: number | null;
+	proxy_username: string | null;
+	proxy_password: string | null;
+	proxy_scheme: string | null;
+};
+
+accountRoutes.post("/:id{[0-9]+}/test", async (c) => {
+	const id = Number(c.req.param("id"));
+
+	const row = await one<AccountWithProxy>(
+		c.env.DB,
+		`SELECT a.*, p.host AS proxy_host, p.port AS proxy_port,
+		        p.username AS proxy_username, p.password AS proxy_password, p.scheme AS proxy_scheme
+		 FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id
+		 WHERE a.id = ? AND a.deleted_at IS NULL`,
+		id,
+	);
+	if (!row) return c.json({ error: "not found" }, 404);
+	if (!row.access_token) return c.json({ error: "no access_token" }, 400);
+
+	const proxy: ProxyConfig | null = row.proxy_host
+		? { host: row.proxy_host, port: row.proxy_port!, username: row.proxy_username, password: row.proxy_password, scheme: (row.proxy_scheme ?? "http") as "http" | "socks5" }
+		: null;
+
+	const apiBase = (row.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");
+	const isApiKey = row.access_token.startsWith("sk-") || row.access_token.startsWith("sk_");
+
+	const reqHeaders: Record<string, string> = {
+		"content-type": "application/json",
+		"anthropic-version": "2023-06-01",
+	};
+	if (isApiKey) {
+		reqHeaders["x-api-key"] = row.access_token;
+	} else {
+		reqHeaders["authorization"] = `Bearer ${row.access_token}`;
+	}
+
+	let resp: Response;
+	let body: string;
+	try {
+		resp = await proxyFetch(
+			c.env,
+			new Request(`${apiBase}/v1/messages`, {
+				method: "POST",
+				headers: reqHeaders,
+				body: JSON.stringify({
+					model: "claude-haiku-4-5-20251001",
+					max_tokens: 1,
+					messages: [{ role: "user", content: "hi" }],
+				}),
+			}),
+			proxy,
+		);
+		body = await resp.text();
+	} catch (e) {
+		const reason = `network error: ${(e as Error).message}`;
+		await run(
+			c.env.DB,
+			`UPDATE accounts SET status = 'problem', status_reason = ?, status_changed_at = ?, last_test_response = ?, updated_at = ? WHERE id = ?`,
+			reason, nowDateTime(), reason, nowDateTime(), id,
+		);
+		return c.json({ ok: false, status: "problem", status_reason: reason });
+	}
+
+	let newStatus: AccountStatus;
+	let statusReason: string | null = null;
+
+	if (resp.ok) {
+		newStatus = "active";
+	} else {
+		newStatus = "problem";
+		try {
+			const parsed = JSON.parse(body) as Record<string, unknown>;
+			const msg = ((parsed.error as Record<string, unknown>)?.message ?? parsed.message ?? "") as string;
+			statusReason = msg ? msg.slice(0, 300) : `HTTP ${resp.status}`;
+		} catch {
+			statusReason = `HTTP ${resp.status}`;
+		}
+	}
+
+	await run(
+		c.env.DB,
+		`UPDATE accounts SET status = ?, status_reason = ?, status_changed_at = ?, last_test_response = ?, updated_at = ? WHERE id = ?`,
+		newStatus, statusReason, nowDateTime(), body.slice(0, 500), nowDateTime(), id,
+	);
+	await audit(c.env.DB, "account.test", { type: "account", id }, { status: newStatus, http_status: resp.status });
+	return c.json({ ok: resp.ok, status: newStatus, status_reason: statusReason, http_status: resp.status });
 });

@@ -166,7 +166,7 @@ onboardRoutes.post("/complete", async (c) => {
 			proxy_id, status, total_capacity, used_count,
 			account_level, multiplier,
 			purchase_date, expire_date
-		) VALUES ('claude', ?, ?, ?, ?, ?, ?, 'active', 10, 0, 1, 1.0, ?, ?)`,
+		) VALUES ('claude', ?, ?, ?, ?, ?, ?, 'paused', 10, 0, 1, 4.0, ?, ?)`,
 		finalEmail,
 		body.name ?? null,
 		access,
@@ -223,6 +223,149 @@ async function dedupeEmail(db: D1Database, email: string): Promise<string> {
 		candidate = `${email}${suffix}`;
 	}
 }
+
+interface ApiKeyEntry {
+	key: string;
+	proxy?: string;
+	name?: string;
+}
+
+onboardRoutes.post("/api-key", async (c) => {
+	const body = await c.req.json<{ entries: ApiKeyEntry[]; name?: string }>();
+	if (!Array.isArray(body.entries) || body.entries.length === 0)
+		return c.json({ error: "entries required" }, 400);
+
+	const results: Array<Record<string, unknown>> = [];
+	const purchase = nowDate();
+	const expire = addDays(purchase, 365);
+
+	for (const entry of body.entries) {
+		const key = entry.key.trim();
+		if (!key.startsWith("sk-") && !key.startsWith("sk_")) {
+			results.push({ key: key.slice(0, 24), error: "not a valid sk- key" });
+			continue;
+		}
+
+		const dupe = await one<{ id: number }>(
+			c.env.DB,
+			`SELECT id FROM accounts WHERE access_token = ? AND deleted_at IS NULL`,
+			key,
+		);
+		if (dupe) {
+			results.push({ key: key.slice(0, 24) + "…", skipped: true, id: dupe.id });
+			continue;
+		}
+
+		let proxyId: number | null = null;
+		if (entry.proxy?.trim()) {
+			const p = parseProxyPaste(entry.proxy.trim());
+			if (p) proxyId = await upsertProxy(c.env.DB, p);
+		}
+
+		const label = `apikey-${key.slice(-12)}`;
+		const email = await dedupeEmail(c.env.DB, label);
+		const r = await exec(
+			c.env.DB,
+			`INSERT INTO accounts (
+				provider, email, name,
+				access_token, access_token_expires_at,
+				is_third_party, third_party_api_url,
+				proxy_id, status, total_capacity, used_count,
+				account_level, multiplier,
+				purchase_date, expire_date
+			) VALUES ('claude', ?, ?, ?, '2099-01-01 00:00:00', 1, 'https://api.anthropic.com',
+			          ?, 'paused', 10, 0, 1, 4.0, ?, ?)`,
+			email,
+			body.name ?? entry.name ?? null,
+			key,
+			proxyId,
+			purchase,
+			expire,
+		);
+		await audit(c.env.DB, "account.onboard_apikey", { type: "account", id: r.lastRowId }, { email, proxyId });
+		results.push({ id: r.lastRowId, email, proxy_id: proxyId });
+	}
+
+	const added = results.filter((r) => r.id && !r.skipped).length;
+	const skipped = results.filter((r) => r.skipped).length;
+	const errors = results.filter((r) => r.error).length;
+	return c.json({ results, added, skipped, errors });
+});
+
+interface RelayEntry {
+	key: string;
+	url: string;
+	proxy?: string;
+	name?: string;
+}
+
+onboardRoutes.post("/relay", async (c) => {
+	const body = await c.req.json<{ entries: RelayEntry[]; provider: string; name?: string }>();
+	if (!Array.isArray(body.entries) || body.entries.length === 0)
+		return c.json({ error: "entries required" }, 400);
+	if (!["claude", "gpt", "gemini"].includes(body.provider))
+		return c.json({ error: "provider must be claude|gpt|gemini" }, 400);
+
+	const results: Array<Record<string, unknown>> = [];
+	const purchase = nowDate();
+	const expire = addDays(purchase, 365);
+
+	for (const entry of body.entries) {
+		const key = entry.key.trim();
+		const url = entry.url.trim().replace(/\/$/, "");
+		if (!key || !url) {
+			results.push({ key: key.slice(0, 24), error: "key and url both required" });
+			continue;
+		}
+
+		const dupe = await one<{ id: number }>(
+			c.env.DB,
+			`SELECT id FROM accounts WHERE access_token = ? AND third_party_api_url = ? AND deleted_at IS NULL`,
+			key,
+			url,
+		);
+		if (dupe) {
+			results.push({ key: key.slice(0, 24) + "…", url, skipped: true, id: dupe.id });
+			continue;
+		}
+
+		let proxyId: number | null = null;
+		if (entry.proxy?.trim()) {
+			const p = parseProxyPaste(entry.proxy.trim());
+			if (p) proxyId = await upsertProxy(c.env.DB, p);
+		}
+
+		const label = `relay-${key.slice(-12)}`;
+		const email = await dedupeEmail(c.env.DB, label);
+		const r = await exec(
+			c.env.DB,
+			`INSERT INTO accounts (
+				provider, email, name,
+				access_token, access_token_expires_at,
+				is_third_party, third_party_api_url,
+				proxy_id, status, total_capacity, used_count,
+				account_level, multiplier,
+				purchase_date, expire_date
+			) VALUES (?, ?, ?, ?, '2099-01-01 00:00:00', 1, ?,
+			          ?, 'paused', 10, 0, 1, 4.0, ?, ?)`,
+			body.provider,
+			email,
+			body.name ?? entry.name ?? null,
+			key,
+			url,
+			proxyId,
+			purchase,
+			expire,
+		);
+		await audit(c.env.DB, "account.onboard_relay", { type: "account", id: r.lastRowId }, { email, url, provider: body.provider });
+		results.push({ id: r.lastRowId, email, url, proxy_id: proxyId });
+	}
+
+	const added = results.filter((r) => r.id && !r.skipped).length;
+	const skipped = results.filter((r) => r.skipped).length;
+	const errors = results.filter((r) => r.error).length;
+	return c.json({ results, added, skipped, errors });
+});
 
 // (proxyConfigToUrl re-exported as a convenience for tests)
 export { proxyConfigToUrl };

@@ -8,6 +8,7 @@ import { KidGroups } from "./pages/KidGroups";
 import { KidMappings } from "./pages/KidMappings";
 import { Audit } from "./pages/Audit";
 import { Onboard } from "./pages/Onboard";
+import { Cron } from "./pages/Cron";
 import { ApiError, api } from "./lib/api";
 
 function readHash(): string {
@@ -47,6 +48,7 @@ function App() {
 			{page === "kid-groups" && <KidGroups />}
 			{page === "kid-mappings" && <KidMappings />}
 			{page === "onboard" && <Onboard />}
+			{page === "cron" && <Cron />}
 			{page === "audit" && <Audit />}
 		</Layout>
 	);

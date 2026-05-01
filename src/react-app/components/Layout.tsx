@@ -13,6 +13,7 @@ const NAV: NavItem[] = [
 	{ id: "kid-groups", label: "Kid 绑定" },
 	{ id: "kid-mappings", label: "Kid 映射" },
 	{ id: "onboard", label: "上号" },
+	{ id: "cron", label: "定时任务" },
 	{ id: "audit", label: "审计" },
 ];
 

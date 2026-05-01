@@ -19,8 +19,7 @@
 		{
 			"binding": "DB",
 			"database_name": "pool-admin",
-			"database_id": "e9cd46ca-6f6a-4f80-b25b-3000eaa2614d",
-			"remote": true
+			"database_id": "e9cd46ca-6f6a-4f80-b25b-3000eaa2614d"
 		}
 	],
 	"vars": {
@@ -30,6 +29,12 @@
 		"DEFAULT_ACCOUNT_IDS": "",
 		"DEFAULT_GPT_ACCOUNT_IDS": ""
 	},
+	"services": [
+		{
+			"binding": "PROXY",
+			"service": "proxy-egress"
+		}
+	],
 	"triggers": {
 		"crons": [
 			"* * * * *",
