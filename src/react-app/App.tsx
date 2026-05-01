@@ -1,65 +1,54 @@
-// src/App.tsx
+import { useEffect, useState } from "react";
+import { Layout } from "./components/Layout";
+import { Login } from "./pages/Login";
+import { Dashboard } from "./pages/Dashboard";
+import { Accounts } from "./pages/Accounts";
+import { Proxies } from "./pages/Proxies";
+import { KidGroups } from "./pages/KidGroups";
+import { KidMappings } from "./pages/KidMappings";
+import { Audit } from "./pages/Audit";
+import { Onboard } from "./pages/Onboard";
+import { ApiError, api } from "./lib/api";
 
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "/vite.svg";
-import cloudflareLogo from "./assets/Cloudflare_Logo.svg";
-import honoLogo from "./assets/hono.svg";
-import "./App.css";
+function readHash(): string {
+	const h = location.hash.replace(/^#/, "");
+	return h || "dashboard";
+}
 
 function App() {
-	const [count, setCount] = useState(0);
-	const [name, setName] = useState("unknown");
+	const [authed, setAuthed] = useState<boolean | null>(null);
+	const [page, setPage] = useState(readHash());
+
+	useEffect(() => {
+		api.get("/api/admin/me")
+			.then(() => setAuthed(true))
+			.catch((e) => {
+				if (e instanceof ApiError && e.status === 401) setAuthed(false);
+				else setAuthed(false);
+			});
+		const onHash = () => setPage(readHash());
+		window.addEventListener("hashchange", onHash);
+		return () => window.removeEventListener("hashchange", onHash);
+	}, []);
+
+	function navigate(id: string) {
+		location.hash = id;
+		setPage(id);
+	}
+
+	if (authed === null) return <div className="muted" style={{ padding: 32 }}>加载中…</div>;
+	if (!authed) return <Login onSuccess={() => setAuthed(true)} />;
 
 	return (
-		<>
-			<div>
-				<a href="https://vite.dev" target="_blank">
-					<img src={viteLogo} className="logo" alt="Vite logo" />
-				</a>
-				<a href="https://react.dev" target="_blank">
-					<img src={reactLogo} className="logo react" alt="React logo" />
-				</a>
-				<a href="https://hono.dev/" target="_blank">
-					<img src={honoLogo} className="logo cloudflare" alt="Hono logo" />
-				</a>
-				<a href="https://workers.cloudflare.com/" target="_blank">
-					<img
-						src={cloudflareLogo}
-						className="logo cloudflare"
-						alt="Cloudflare logo"
-					/>
-				</a>
-			</div>
-			<h1>Vite + React + Hono + Cloudflare</h1>
-			<div className="card">
-				<button
-					onClick={() => setCount((count) => count + 1)}
-					aria-label="increment"
-				>
-					count is {count}
-				</button>
-				<p>
-					Edit <code>src/App.tsx</code> and save to test HMR
-				</p>
-			</div>
-			<div className="card">
-				<button
-					onClick={() => {
-						fetch("/api/")
-							.then((res) => res.json() as Promise<{ name: string }>)
-							.then((data) => setName(data.name));
-					}}
-					aria-label="get name"
-				>
-					Name from API is: {name}
-				</button>
-				<p>
-					Edit <code>worker/index.ts</code> to change the name
-				</p>
-			</div>
-			<p className="read-the-docs">Click on the logos to learn more</p>
-		</>
+		<Layout current={page} onNavigate={navigate} onLogout={() => setAuthed(false)}>
+			{page === "dashboard" && <Dashboard />}
+			{page === "accounts" && <Accounts />}
+			{page === "proxies" && <Proxies />}
+			{page === "kid-groups" && <KidGroups />}
+			{page === "kid-mappings" && <KidMappings />}
+			{page === "onboard" && <Onboard />}
+			{page === "audit" && <Audit />}
+		</Layout>
 	);
 }
 

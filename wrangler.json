@@ -3,7 +3,9 @@
 	"name": "pool-admin",
 	"main": "./src/worker/index.ts",
 	"compatibility_date": "2025-10-08",
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
 	"observability": {
 		"enabled": true
 	},
@@ -11,5 +13,28 @@
 	"assets": {
 		"directory": "./dist/client",
 		"not_found_handling": "single-page-application"
+	},
+	"d1_databases": [
+
+		{
+			"binding": "DB",
+			"database_name": "pool-admin",
+			"database_id": "e9cd46ca-6f6a-4f80-b25b-3000eaa2614d",
+			"remote": true
+		}
+	],
+	"vars": {
+		"ADMIN_USERNAME": "admin",
+		"API_SECRET_KEY": "change-me-claude",
+		"GPT_API_SECRET_KEY": "change-me-gpt",
+		"DEFAULT_ACCOUNT_IDS": "",
+		"DEFAULT_GPT_ACCOUNT_IDS": ""
+	},
+	"triggers": {
+		"crons": [
+			"* * * * *",
+			"*/10 * * * *",
+			"*/30 * * * *"
+		]
 	}
 }
