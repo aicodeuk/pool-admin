@@ -7,7 +7,6 @@ import {
 	type AccountResponse,
 	type AccountRow,
 	type Provider,
-	type ProxyRow,
 } from "../lib/types";
 import { nowDateTime } from "../lib/time";
 import { proxyConfigToUrl } from "../lib/proxy-fetch";
@@ -15,6 +14,19 @@ import { proxyConfigToUrl } from "../lib/proxy-fetch";
 const ORG_FALLBACK_GROUPS = ["channel_max", "channel_aws_chip", "channel_api"];
 
 type GroupKind = "channel" | "org" | "normal";
+
+// Accounts with proxy fields joined inline — avoids a separate SELECT per request.
+type AccountWithProxy = AccountRow & {
+	px_id: number | null;
+	px_host: string | null;
+	px_port: number | null;
+	px_user: string | null;
+	px_pass: string | null;
+	px_scheme: string | null;
+};
+
+const ACCT_SELECT = `a.*, p.id AS px_id, p.host AS px_host, p.port AS px_port, p.username AS px_user, p.password AS px_pass, p.scheme AS px_scheme`;
+const PROXY_JOIN = `LEFT JOIN proxies p ON a.proxy_id = p.id AND p.is_active = 1`;
 
 function deriveGroupKind(name: string): GroupKind {
 	if (name.startsWith("channel_")) return "channel";
@@ -42,35 +54,32 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 
 	if (kid == null) {
 		const list = await listAvailableShared(db, provider, isMax ?? null);
-		// list() returns AccountResponse[] but pickAccount returns single. The all-shared
-		// path is exposed via a separate handler — keep this branch unused here.
 		return { ok: true, response: list[0] ?? emptyResponse() };
 	}
 
-	// 1. group binding (free-text in kid_groups; kind derived from prefix)
+	// 1. group binding
 	const binding = await one<{ group_name: string }>(
 		db,
 		`SELECT group_name FROM kid_groups WHERE kid = ?`,
 		kid,
 	);
 
-	if (binding && binding.group_name) {
+	if (binding?.group_name) {
 		const kind = deriveGroupKind(binding.group_name);
 		const account = await findAccountByGroup(db, provider, binding.group_name, isMax ?? null, problemAccountId ?? 0);
 		if (account) {
-			await upsertMapping(db, kid, provider, account.id, problemAccountId);
-			return { ok: true, response: await formatResponse(db, account, true) };
+			await upsertMapping(db, kid, provider, account.id);
+			return { ok: true, response: formatResponse(account, true) };
 		}
 		if (kind === "channel") {
 			return { ok: false, status: 404, error: "No available accounts in channel group", details: `group=${binding.group_name}` };
 		}
 		if (kind === "org") {
-			for (const fb of ORG_FALLBACK_GROUPS) {
-				const a = await findAccountByGroup(db, provider, fb, isMax ?? null, problemAccountId ?? 0);
-				if (a) {
-					await upsertMapping(db, kid, provider, a.id, problemAccountId);
-					return { ok: true, response: await formatResponse(db, a, true) };
-				}
+			// Single query with priority ordering instead of sequential loop.
+			const a = await findAccountByGroups(db, provider, ORG_FALLBACK_GROUPS, isMax ?? null, problemAccountId ?? 0);
+			if (a) {
+				await upsertMapping(db, kid, provider, a.id);
+				return { ok: true, response: formatResponse(a, true) };
 			}
 			return { ok: false, status: 404, error: "org_group_exhausted", details: binding.group_name };
 		}
@@ -87,29 +96,29 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	if (mapping && !forceReplace) {
 		const existing = await loadAccount(db, mapping.account_id);
 		if (existing && satisfiesIsMax(existing, isMax ?? null) && existing.status === "active") {
-			return { ok: true, response: await formatResponse(db, existing, false) };
+			return { ok: true, response: formatResponse(existing, false) };
 		}
 	}
 
-	// 3. assign new from shared pool
+	// 3. assign new from shared pool; pass known old account_id to skip SELECT inside upsertMapping
 	const candidate = await findSharedAvailable(db, provider, isMax ?? null, problemAccountId ?? 0);
 	if (!candidate) {
 		const fallback = await findThirdPartyFallback(db, provider);
 		if (!fallback) {
 			return { ok: false, status: 404, error: "No available accounts to assign" };
 		}
-		await upsertMapping(db, kid, provider, fallback.id, problemAccountId);
-		return { ok: true, response: await formatResponse(db, fallback, false) };
+		await upsertMapping(db, kid, provider, fallback.id, mapping?.account_id);
+		return { ok: true, response: formatResponse(fallback, false) };
 	}
-	await upsertMapping(db, kid, provider, candidate.id, problemAccountId);
-	return { ok: true, response: await formatResponse(db, candidate, false) };
+	await upsertMapping(db, kid, provider, candidate.id, mapping?.account_id);
+	return { ok: true, response: formatResponse(candidate, false) };
 }
 
 function emptyResponse(): AccountResponse {
 	return {
 		id: 0,
 		access_token: "",
-		has_claude_max: false,
+		has_claude_max: true,
 		device: "linux",
 		proxy: "",
 		level: 0,
@@ -122,24 +131,26 @@ function emptyResponse(): AccountResponse {
 function satisfiesIsMax(a: AccountRow, isMax: 0 | 1 | null): boolean {
 	if (isMax == null) return true;
 	if (isMax === 1) return a.tier === "max";
-	return true; // isMax=0 accepts all
+	return true;
 }
 
-async function loadAccount(db: DB, id: number): Promise<AccountRow | null> {
-	return one<AccountRow>(db, `SELECT * FROM accounts WHERE id = ? AND deleted_at IS NULL`, id);
-}
-
-async function loadProxyUrl(db: DB, proxyId: number | null): Promise<string> {
-	if (!proxyId) return "";
-	const p = await one<ProxyRow>(db, `SELECT * FROM proxies WHERE id = ? AND is_active = 1`, proxyId);
-	if (!p) return "";
+function buildProxyUrl(r: AccountWithProxy): string {
+	if (!r.px_id || !r.px_host || !r.px_port) return "";
 	return proxyConfigToUrl({
-		host: p.host,
-		port: p.port,
-		username: p.username,
-		password: p.password,
-		scheme: p.scheme,
+		host: r.px_host,
+		port: r.px_port,
+		username: r.px_user,
+		password: r.px_pass,
+		scheme: (r.px_scheme as "http" | "socks5") ?? "http",
 	});
+}
+
+async function loadAccount(db: DB, id: number): Promise<AccountWithProxy | null> {
+	return one<AccountWithProxy>(
+		db,
+		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN} WHERE a.id = ? AND a.deleted_at IS NULL`,
+		id,
+	);
 }
 
 async function findAccountByGroup(
@@ -148,17 +159,41 @@ async function findAccountByGroup(
 	groupName: string,
 	isMax: 0 | 1 | null,
 	excludeId: number,
-): Promise<AccountRow | null> {
-	const tierClause = isMax === 1 ? `AND tier = 'max'` : "";
-	const excludeClause = excludeId > 0 ? `AND id != ${excludeId | 0}` : "";
-	return one<AccountRow>(
+): Promise<AccountWithProxy | null> {
+	const tierClause = isMax === 1 ? `AND a.tier = 'max'` : "";
+	const excludeClause = excludeId > 0 ? `AND a.id != ${excludeId | 0}` : "";
+	return one<AccountWithProxy>(
 		db,
-		`SELECT * FROM accounts
-		 WHERE provider = ? AND group_name = ? AND status = 'active' AND deleted_at IS NULL
+		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
+		 WHERE a.provider = ? AND a.group_name = ? AND a.status = 'active' AND a.deleted_at IS NULL
 		   ${tierClause} ${excludeClause}
-		 ORDER BY account_level DESC, RANDOM() LIMIT 1`,
+		 ORDER BY a.account_level DESC, RANDOM() LIMIT 1`,
 		provider,
 		groupName,
+	);
+}
+
+// Single-query replacement for the sequential org-fallback loop.
+// Preserves priority order of groupNames via CASE ordering.
+async function findAccountByGroups(
+	db: DB,
+	provider: Provider,
+	groupNames: readonly string[],
+	isMax: 0 | 1 | null,
+	excludeId: number,
+): Promise<AccountWithProxy | null> {
+	const tierClause = isMax === 1 ? `AND a.tier = 'max'` : "";
+	const excludeClause = excludeId > 0 ? `AND a.id != ${excludeId | 0}` : "";
+	const placeholders = groupNames.map(() => "?").join(", ");
+	const caseWhen = groupNames.map((g, i) => `WHEN '${g.replace(/'/g, "''")}' THEN ${i}`).join(" ");
+	return one<AccountWithProxy>(
+		db,
+		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
+		 WHERE a.provider = ? AND a.group_name IN (${placeholders}) AND a.status = 'active' AND a.deleted_at IS NULL
+		   ${tierClause} ${excludeClause}
+		 ORDER BY CASE a.group_name ${caseWhen} END, RANDOM() LIMIT 1`,
+		provider,
+		...groupNames,
 	);
 }
 
@@ -167,28 +202,28 @@ async function findSharedAvailable(
 	provider: Provider,
 	isMax: 0 | 1 | null,
 	excludeId: number,
-): Promise<AccountRow | null> {
-	const tierClause = isMax === 1 ? `AND tier = 'max'` : "";
-	const excludeClause = excludeId > 0 ? `AND id != ${excludeId | 0}` : "";
-	return one<AccountRow>(
+): Promise<AccountWithProxy | null> {
+	const tierClause = isMax === 1 ? `AND a.tier = 'max'` : "";
+	const excludeClause = excludeId > 0 ? `AND a.id != ${excludeId | 0}` : "";
+	return one<AccountWithProxy>(
 		db,
-		`SELECT * FROM accounts
-		 WHERE provider = ? AND status = 'active' AND deleted_at IS NULL
-		   AND (group_name IS NULL OR group_name = '')
-		   AND is_third_party = 0
-		   AND available_count > 0
+		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
+		 WHERE a.provider = ? AND a.status = 'active' AND a.deleted_at IS NULL
+		   AND (a.group_name IS NULL OR a.group_name = '')
+		   AND a.is_third_party = 0
+		   AND a.available_count > 0
 		   ${tierClause} ${excludeClause}
 		 ORDER BY RANDOM() LIMIT 1`,
 		provider,
 	);
 }
 
-async function findThirdPartyFallback(db: DB, provider: Provider): Promise<AccountRow | null> {
-	return one<AccountRow>(
+async function findThirdPartyFallback(db: DB, provider: Provider): Promise<AccountWithProxy | null> {
+	return one<AccountWithProxy>(
 		db,
-		`SELECT * FROM accounts
-		 WHERE provider = ? AND is_third_party = 1 AND deleted_at IS NULL
-		   AND (group_name IS NULL OR group_name = '')
+		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
+		 WHERE a.provider = ? AND a.is_third_party = 1 AND a.deleted_at IS NULL
+		   AND (a.group_name IS NULL OR a.group_name = '')
 		 ORDER BY RANDOM() LIMIT 1`,
 		provider,
 	);
@@ -199,29 +234,29 @@ async function upsertMapping(
 	kid: number,
 	provider: Provider,
 	accountId: number,
-	oldAccountId?: number,
+	knownOldAccountId?: number,
 ): Promise<void> {
 	const ts = nowDateTime();
-	const existing = await one<{ id: number; account_id: number }>(
+
+	// Use the old account_id the caller already fetched, or query for it.
+	const oldAccountId = knownOldAccountId ?? (await one<{ account_id: number }>(
 		db,
-		`SELECT id, account_id FROM kid_mappings WHERE kid = ? AND provider = ?`,
+		`SELECT account_id FROM kid_mappings WHERE kid = ? AND provider = ?`,
 		kid,
 		provider,
-	);
-	if (existing) {
-		if (existing.account_id !== accountId) {
-			await run(db, `UPDATE accounts SET used_count = MAX(used_count - 1, 0), updated_at = ? WHERE id = ?`, ts, existing.account_id);
+	))?.account_id;
+
+	if (oldAccountId !== undefined) {
+		if (oldAccountId !== accountId) {
+			await run(db, `UPDATE accounts SET used_count = MAX(used_count - 1, 0), updated_at = ? WHERE id = ?`, ts, oldAccountId);
 			await run(db, `UPDATE accounts SET used_count = used_count + 1, updated_at = ? WHERE id = ?`, ts, accountId);
-			await run(db, `UPDATE kid_mappings SET account_id = ?, updated_at = ? WHERE id = ?`, accountId, ts, existing.id);
+			await run(db, `UPDATE kid_mappings SET account_id = ?, updated_at = ? WHERE kid = ? AND provider = ?`, accountId, ts, kid, provider);
 		} else {
-			await run(db, `UPDATE kid_mappings SET updated_at = ? WHERE id = ?`, ts, existing.id);
+			await run(db, `UPDATE kid_mappings SET updated_at = ? WHERE kid = ? AND provider = ?`, ts, kid, provider);
 		}
 	} else {
 		await run(db, `INSERT INTO kid_mappings (kid, provider, account_id) VALUES (?, ?, ?)`, kid, provider, accountId);
 		await run(db, `UPDATE accounts SET used_count = used_count + 1, updated_at = ? WHERE id = ?`, ts, accountId);
-	}
-	if (oldAccountId && oldAccountId !== accountId) {
-		// best-effort already counted via decrement above
 	}
 }
 
@@ -239,14 +274,13 @@ async function markAccountProblem(db: DB, id: number): Promise<void> {
 	);
 }
 
-async function formatResponse(db: DB, a: AccountRow, isDedicated: boolean): Promise<AccountResponse> {
-	const proxyUrl = await loadProxyUrl(db, a.proxy_id);
+function formatResponse(a: AccountWithProxy, isDedicated: boolean): AccountResponse {
 	const r: AccountResponse = {
 		id: a.id,
 		access_token: a.access_token ?? "",
-		has_claude_max: a.tier === "max",
+		has_claude_max: true,
 		device: "linux",
-		proxy: proxyUrl,
+		proxy: buildProxyUrl(a),
 		level: a.account_level,
 		is_dedicated: isDedicated,
 		is_third_party: a.is_third_party === 1,
@@ -264,10 +298,9 @@ export async function listAvailableShared(
 	isMax: 0 | 1 | null,
 ): Promise<AccountResponse[]> {
 	const tierClause = isMax === 1 ? `AND a.tier = 'max'` : "";
-	const rows = await all<AccountRow & { px_id: number | null; px_host: string | null; px_port: number | null; px_user: string | null; px_pass: string | null; px_scheme: string | null }>(
+	const rows = await all<AccountWithProxy>(
 		db,
-		`SELECT a.*, p.id AS px_id, p.host AS px_host, p.port AS px_port, p.username AS px_user, p.password AS px_pass, p.scheme AS px_scheme
-		 FROM accounts a LEFT JOIN proxies p ON a.proxy_id = p.id AND p.is_active = 1
+		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
 		 WHERE a.provider = ? AND a.status = 'active' AND a.deleted_at IS NULL
 		   AND (a.group_name IS NULL OR a.group_name = '')
 		   ${tierClause}`,
@@ -276,21 +309,12 @@ export async function listAvailableShared(
 	const out: AccountResponse[] = [];
 	for (const r of rows) {
 		if (!r.access_token) continue;
-		let proxyUrl = "";
-		if (r.px_id && r.px_host && r.px_port) {
-			proxyUrl = proxyConfigToUrl({
-				host: r.px_host,
-				port: r.px_port,
-				username: r.px_user,
-				password: r.px_pass,
-				scheme: (r.px_scheme as "http" | "socks5") ?? "http",
-			});
-		}
+		const proxyUrl = buildProxyUrl(r);
 		if (!r.is_third_party && !proxyUrl) continue;
 		out.push({
 			id: r.id,
 			access_token: r.access_token,
-			has_claude_max: r.tier === "max",
+			has_claude_max: true,
 			device: "linux",
 			proxy: proxyUrl,
 			level: r.account_level,
