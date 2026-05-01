@@ -31,12 +31,11 @@ export async function proxyFetch(
 		const req = new Request(target, init);
 		const headers = new Headers(req.headers);
 		headers.set("X-Proxy-Url", proxyConfigToUrl(proxy));
+		// ReadableStream bodies don't cross service-binding / Container boundaries
+		// reliably — buffer to ArrayBuffer first.
+		const body = req.body ? await req.arrayBuffer() : null;
 		return proxyService.fetch(
-			new Request(req.url, {
-				method: req.method,
-				headers,
-				body: req.body,
-			}),
+			new Request(req.url, { method: req.method, headers, body }),
 		);
 	}
 	// fallback: direct fetch (only safe for endpoints that do not require proxy)

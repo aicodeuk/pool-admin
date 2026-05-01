@@ -18,6 +18,7 @@ interface Account {
 	expire_date: string | null;
 	usage_5h_pct: number | null;
 	usage_7d_pct: number | null;
+	proxy_id: number | null;
 	proxy_label: string | null;
 }
 
@@ -27,8 +28,7 @@ export function Accounts() {
 	const [filters, setFilters] = useState({ provider: "claude", status: "", q: "" });
 	const [loading, setLoading] = useState(false);
 	const [editing, setEditing] = useState<Account | null>(null);
-	const [testing, setTesting] = useState<number | null>(null);
-	const [testResult, setTestResult] = useState<{ id: number; ok: boolean; reason: string | null } | null>(null);
+	const [testModal, setTestModal] = useState<{ account: Account; loading: boolean; result: TestResult | null; error: string | null } | null>(null);
 
 	const reload = useCallback(async () => {
 		setLoading(true);
@@ -71,17 +71,14 @@ export function Accounts() {
 		reload();
 	}
 
-	async function testAccount(id: number) {
-		setTesting(id);
-		setTestResult(null);
+	async function testAccount(account: Account) {
+		setTestModal({ account, loading: true, result: null, error: null });
 		try {
-			const r = await api.post<{ ok: boolean; status: string; status_reason: string | null }>(`/api/admin/accounts/${id}/test`);
-			setTestResult({ id, ok: r.ok, reason: r.status_reason });
+			const r = await api.post<TestResult>(`/api/admin/accounts/${account.id}/test`);
+			setTestModal((prev) => prev && { ...prev, loading: false, result: r });
 			reload();
 		} catch (e) {
-			setTestResult({ id, ok: false, reason: (e as Error).message });
-		} finally {
-			setTesting(null);
+			setTestModal((prev) => prev && { ...prev, loading: false, error: (e as Error).message });
 		}
 	}
 
@@ -110,14 +107,6 @@ export function Accounts() {
 				<button onClick={reload} disabled={loading}>刷新</button>
 			</div>
 
-			{testResult && (
-				<div style={{ padding: "8px 12px", marginBottom: 12, borderRadius: 6, border: "1px solid", fontSize: 13, background: testResult.ok ? "#ecfdf5" : "#fef2f2", borderColor: testResult.ok ? "#6ee7b7" : "#fca5a5" }}>
-					{testResult.ok
-						? `✓ #${testResult.id} 探活成功 → active`
-						: `✗ #${testResult.id} 探活失败${testResult.reason ? `：${testResult.reason}` : ""}`}
-					<button className="ghost" style={{ marginLeft: 8, padding: "2px 6px", fontSize: 11 }} onClick={() => setTestResult(null)}>✕</button>
-				</div>
-			)}
 
 			<div className="card" style={{ padding: 0, overflow: "auto" }}>
 				<table>
@@ -147,9 +136,7 @@ export function Accounts() {
 								<td>
 									<div className="row" style={{ gap: 4 }}>
 										<button className="ghost" onClick={() => setEditing(a)}>编辑</button>
-										<button className="ghost" onClick={() => testAccount(a.id)} disabled={testing === a.id} title="发送探活请求，成功→active，失败→problem">
-											{testing === a.id ? "…" : "探活"}
-										</button>
+										<button className="ghost" onClick={() => testAccount(a)} title="发送探活请求，成功→active，失败→problem">探活</button>
 										{a.status === "problem" && <button className="ghost" onClick={() => clearProblem(a.id)}>恢复</button>}
 										<button className="ghost" onClick={() => patch(a.id, { status: a.status === "paused" ? "active" : "paused" })}>{a.status === "paused" ? "启用" : "停用"}</button>
 										<button className="ghost" onClick={() => resetUsed(a.id)}>重置</button>
@@ -163,8 +150,88 @@ export function Accounts() {
 			</div>
 
 			{editing && <EditModal account={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
+			{testModal && <TestModal state={testModal} onClose={() => setTestModal(null)} />}
 		</>
 	);
+}
+
+interface TestResult {
+	ok: boolean;
+	status: string;
+	status_reason: string | null;
+	http_status: number | null;
+	request_url: string;
+	proxy: string | null;
+	request_payload: unknown;
+	response_body: string | null;
+}
+
+function TestModal({ state, onClose }: { state: { account: Account; loading: boolean; result: TestResult | null; error: string | null }; onClose: () => void }) {
+	const { account, loading, result, error } = state;
+
+	function formatBody(raw: string | null): string {
+		if (!raw) return "";
+		try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; }
+	}
+
+	const statusColor = result ? (result.ok ? "#16a34a" : "#dc2626") : "#6b7280";
+
+	return (
+		<div className="modal-back" onClick={onClose}>
+			<div className="modal" style={{ maxWidth: 620, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+				<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+					<h3 style={{ margin: 0 }}>探活 #{account.id}{account.email ? ` — ${account.email}` : ""}</h3>
+					{!loading && result && (
+						<span style={{ fontWeight: 600, color: statusColor, fontSize: 13 }}>
+							{result.ok ? "✓ 成功" : "✗ 失败"}{result.http_status ? ` HTTP ${result.http_status}` : ""}
+						</span>
+					)}
+				</div>
+
+				{loading && <div style={{ textAlign: "center", padding: "32px 0", color: "#6b7280" }}>请求中…</div>}
+
+				{error && <div style={{ padding: "10px 12px", borderRadius: 6, background: "#fef2f2", color: "#dc2626", fontSize: 13 }}>{error}</div>}
+
+				{result && (<>
+					<div style={{ marginBottom: 12 }}>
+						<div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>请求</div>
+						<div style={{ fontSize: 12, marginBottom: 4 }}>
+							<span style={{ color: "#6b7280" }}>地址：</span>
+							<span className="mono">{result.request_url}</span>
+						</div>
+						<div style={{ fontSize: 12, marginBottom: 6 }}>
+							<span style={{ color: "#6b7280" }}>代理：</span>
+							<span className="mono">{result.proxy ?? "直连"}</span>
+						</div>
+						<pre style={{ margin: 0, padding: "8px 10px", borderRadius: 6, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 11, overflow: "auto", maxHeight: 140 }}>
+							{JSON.stringify(result.request_payload, null, 2)}
+						</pre>
+					</div>
+
+					<div>
+						<div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>响应</div>
+						{result.status_reason && (
+							<div style={{ fontSize: 12, marginBottom: 6, color: "#dc2626" }}>{result.status_reason}</div>
+						)}
+						<pre style={{ margin: 0, padding: "8px 10px", borderRadius: 6, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 11, overflow: "auto", maxHeight: 240, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+							{formatBody(result.response_body) || <span style={{ color: "#9ca3af" }}>（无响应体）</span>}
+						</pre>
+					</div>
+				</>)}
+
+				<div className="row" style={{ justifyContent: "flex-end", marginTop: 16 }}>
+					<button onClick={onClose}>关闭</button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+interface ProxyOption {
+	id: number;
+	host: string;
+	port: number;
+	name: string | null;
 }
 
 function EditModal({ account, onClose, onSaved }: { account: Account; onClose: () => void; onSaved: () => void }) {
@@ -175,7 +242,13 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 		multiplier: account.multiplier,
 		total_capacity: account.total_capacity,
 		expire_date: account.expire_date ?? "",
+		proxy_id: account.proxy_id as number | null,
 	});
+	const [proxies, setProxies] = useState<ProxyOption[]>([]);
+
+	useEffect(() => {
+		api.get<{ items: ProxyOption[] }>("/api/admin/proxies").then((r) => setProxies(r.items));
+	}, []);
 
 	async function save() {
 		await api.patch(`/api/admin/accounts/${account.id}`, {
@@ -185,6 +258,7 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 			multiplier: Number(form.multiplier),
 			total_capacity: Number(form.total_capacity),
 			expire_date: form.expire_date || null,
+			proxy_id: form.proxy_id,
 		});
 		onSaved();
 	}
@@ -203,6 +277,16 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 				<div className="field"><label>积分倍率</label><input type="number" step="0.1" value={form.multiplier} onChange={(e) => setForm({ ...form, multiplier: Number(e.target.value) })} /></div>
 				<div className="field"><label>总容量</label><input type="number" value={form.total_capacity} onChange={(e) => setForm({ ...form, total_capacity: Number(e.target.value) })} /></div>
 				<div className="field"><label>到期日 (YYYY-MM-DD)</label><input value={form.expire_date} onChange={(e) => setForm({ ...form, expire_date: e.target.value })} /></div>
+				<div className="field"><label>代理</label>
+					<select value={form.proxy_id ?? ""} onChange={(e) => setForm({ ...form, proxy_id: e.target.value ? Number(e.target.value) : null })}>
+						<option value="">无代理</option>
+						{proxies.map((p) => (
+							<option key={p.id} value={p.id}>
+								#{p.id} — {p.host}:{p.port}{p.name ? ` (${p.name})` : ""}
+							</option>
+						))}
+					</select>
+				</div>
 				<div className="row" style={{ justifyContent: "flex-end" }}>
 					<button onClick={onClose}>取消</button>
 					<button className="primary" onClick={save}>保存</button>

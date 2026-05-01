@@ -214,19 +214,23 @@ accountRoutes.post("/:id{[0-9]+}/test", async (c) => {
 		reqHeaders["authorization"] = `Bearer ${row.access_token}`;
 	}
 
+	const requestUrl = `${apiBase}/v1/messages`;
+	const requestPayload = {
+		model: "claude-haiku-4-5-20251001",
+		max_tokens: 1,
+		messages: [{ role: "user", content: "hi" }],
+	};
+	const proxyDisplay = row.proxy_host ? `${row.proxy_scheme ?? "http"}://${row.proxy_host}:${row.proxy_port}` : null;
+
 	let resp: Response;
 	let body: string;
 	try {
 		resp = await proxyFetch(
 			c.env,
-			new Request(`${apiBase}/v1/messages`, {
+			new Request(requestUrl, {
 				method: "POST",
 				headers: reqHeaders,
-				body: JSON.stringify({
-					model: "claude-haiku-4-5-20251001",
-					max_tokens: 1,
-					messages: [{ role: "user", content: "hi" }],
-				}),
+				body: JSON.stringify(requestPayload),
 			}),
 			proxy,
 		);
@@ -238,7 +242,7 @@ accountRoutes.post("/:id{[0-9]+}/test", async (c) => {
 			`UPDATE accounts SET status = 'problem', status_reason = ?, status_changed_at = ?, last_test_response = ?, updated_at = ? WHERE id = ?`,
 			reason, nowDateTime(), reason, nowDateTime(), id,
 		);
-		return c.json({ ok: false, status: "problem", status_reason: reason });
+		return c.json({ ok: false, status: "problem", status_reason: reason, http_status: null, request_url: requestUrl, proxy: proxyDisplay, request_payload: requestPayload, response_body: null });
 	}
 
 	let newStatus: AccountStatus;
@@ -263,5 +267,5 @@ accountRoutes.post("/:id{[0-9]+}/test", async (c) => {
 		newStatus, statusReason, nowDateTime(), body.slice(0, 500), nowDateTime(), id,
 	);
 	await audit(c.env.DB, "account.test", { type: "account", id }, { status: newStatus, http_status: resp.status });
-	return c.json({ ok: resp.ok, status: newStatus, status_reason: statusReason, http_status: resp.status });
+	return c.json({ ok: resp.ok, status: newStatus, status_reason: statusReason, http_status: resp.status, request_url: requestUrl, proxy: proxyDisplay, request_payload: requestPayload, response_body: body });
 });
