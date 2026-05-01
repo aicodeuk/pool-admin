@@ -106,11 +106,12 @@ proxyRoutes.post("/:id{[0-9]+}/test", async (c) => {
 		return c.json({ ok: false, error: `HTTP ${resp.status}`, detail: body.slice(0, 200), latency_ms });
 	}
 
+	const text = await resp.text();
 	let raw: Record<string, unknown> = {};
 	try {
-		raw = await resp.json() as Record<string, unknown>;
+		raw = JSON.parse(text) as Record<string, unknown>;
 	} catch {
-		return c.json({ ok: false, error: "non-JSON response", latency_ms });
+		return c.json({ ok: false, error: "non-JSON response", body: text.slice(0, 800), latency_ms });
 	}
 
 	// ipwho.is returns { ip, country, country_code, city, region, connection: { org, isp } }

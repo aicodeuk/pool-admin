@@ -22,6 +22,8 @@ interface TestResult {
 	org?: string;
 	latency_ms?: number;
 	error?: string;
+	body?: string;
+	detail?: string;
 }
 
 export function Proxies() {
@@ -140,10 +142,16 @@ function TestCell({ result }: { result: TestResult | undefined }) {
 	if (!result) return <span className="muted" style={{ fontSize: 12 }}>—</span>;
 
 	if (!result.ok) {
+		const detail = result.body ?? result.detail ?? result.error ?? "";
 		return (
-			<span style={{ fontSize: 12, color: "#b91c1c" }} title={result.error}>
-				✗ {result.error?.slice(0, 40)}
-			</span>
+			<div style={{ fontSize: 12, color: "#b91c1c" }}>
+				<div>✗ {result.error}</div>
+				{detail && result.body && (
+					<div style={{ color: "#6b7280", fontFamily: "ui-monospace, monospace", fontSize: 11, marginTop: 2, maxWidth: 280, wordBreak: "break-all" }}>
+						{detail.slice(0, 120)}{detail.length > 120 ? "…" : ""}
+					</div>
+				)}
+			</div>
 		);
 	}
 
