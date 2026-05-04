@@ -25,11 +25,7 @@ export async function run(
 	sql: string,
 	...params: unknown[]
 ): Promise<D1Result> {
-	const [, result] = await db.batch([
-		db.prepare("PRAGMA foreign_keys = OFF"),
-		db.prepare(sql).bind(...params),
-	]);
-	return result;
+	return db.prepare(sql).bind(...params).run();
 }
 
 export async function exec(
@@ -37,10 +33,7 @@ export async function exec(
 	sql: string,
 	...params: unknown[]
 ): Promise<{ lastRowId: number; changes: number }> {
-	const [, r] = await db.batch([
-		db.prepare("PRAGMA foreign_keys = OFF"),
-		db.prepare(sql).bind(...params),
-	]);
+	const r = await db.prepare(sql).bind(...params).run();
 	return {
 		lastRowId: Number(r.meta?.last_row_id ?? 0),
 		changes: r.meta?.changes ?? 0,
