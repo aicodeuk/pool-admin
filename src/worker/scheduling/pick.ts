@@ -13,10 +13,6 @@ import { proxyConfigToUrl, proxyFetch, type ProxyConfig } from "../lib/proxy-fet
 
 const PROBE_URL = "https://api.anthropic.com/api/oauth/usage";
 const PROBE_DEBOUNCE_MS = 3 * 60 * 1000; // 3 minutes
-
-type GroupKind = "channel" | "normal";
-
-// Accounts with proxy fields joined inline — avoids a separate SELECT per request.
 type AccountWithProxy = AccountRow & {
 	px_id: number | null;
 	px_host: string | null;
@@ -29,10 +25,6 @@ type AccountWithProxy = AccountRow & {
 const ACCT_SELECT = `a.*, p.id AS px_id, p.host AS px_host, p.port AS px_port, p.username AS px_user, p.password AS px_pass, p.scheme AS px_scheme`;
 const PROXY_JOIN = `LEFT JOIN proxies p ON a.proxy_id = p.id AND p.is_active = 1`;
 
-function deriveGroupKind(name: string): GroupKind {
-	if (name.startsWith("channel_")) return "channel";
-	return "normal";
-}
 
 interface PickOpts {
 	provider: Provider;
@@ -54,6 +46,10 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 		await scheduleProblemProbe(db, env, ctx, problemAccountId);
 	}
 
+	// Only exclude the problem account when actively force-replacing.
+	// aid without force_replace is informational only and must not affect account selection.
+	const excludeId = forceReplace ? (problemAccountId ?? 0) : 0;
+
 	if (kid == null) {
 		const list = await listAvailableShared(db, provider, isMax ?? null);
 		return { ok: true, response: list[0] ?? emptyResponse() };
@@ -67,16 +63,13 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	);
 
 	if (binding?.group_name) {
-		const kind = deriveGroupKind(binding.group_name);
-		const account = await findAccountByGroup(db, provider, binding.group_name, isMax ?? null, problemAccountId ?? 0);
+		const account = await findAccountByGroup(db, provider, binding.group_name, isMax ?? null, excludeId);
 		if (account) {
 			await upsertMapping(db, kid, provider, account.id);
 			return { ok: true, response: formatResponse(account, true) };
 		}
-		if (kind === "channel") {
-			return { ok: false, status: 404, error: "No available accounts in channel group", details: `group=${binding.group_name}` };
-		}
-		// 'normal' falls through to shared pool selection
+		// Group has a binding but no active account available — never fall through to shared pool.
+		return { ok: false, status: 404, error: "No available accounts in group", details: `group=${binding.group_name}` };
 	}
 
 	// 2. existing mapping
@@ -94,7 +87,7 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	}
 
 	// 3. assign new from shared pool; pass known old account_id to skip SELECT inside upsertMapping
-	const candidate = await findSharedAvailable(db, provider, isMax ?? null, problemAccountId ?? 0);
+	const candidate = await findSharedAvailable(db, provider, isMax ?? null, excludeId);
 	if (!candidate) {
 		const fallback = await findThirdPartyFallback(db, provider);
 		if (!fallback) {
@@ -191,7 +184,7 @@ async function findThirdPartyFallback(db: DB, provider: Provider): Promise<Accou
 	return one<AccountWithProxy>(
 		db,
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
-		 WHERE a.provider = ? AND a.is_third_party = 1 AND a.deleted_at IS NULL
+		 WHERE a.provider = ? AND a.is_third_party = 1 AND a.status = 'active' AND a.deleted_at IS NULL
 		   AND (a.group_name IS NULL OR a.group_name = '')
 		 ORDER BY RANDOM() LIMIT 1`,
 		provider,
