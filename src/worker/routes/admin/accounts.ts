@@ -50,7 +50,7 @@ accountRoutes.get("/", async (c) => {
 		        (SELECT COUNT(*) FROM kid_mappings km WHERE km.account_id = a.id) AS kid_count
 		 FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id
 		 WHERE ${where.join(" AND ")}
-		 ORDER BY a.id DESC LIMIT ? OFFSET ?`,
+		 ORDER BY a.priority DESC, a.id DESC LIMIT ? OFFSET ?`,
 		...args,
 		limit,
 		offset,

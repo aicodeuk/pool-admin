@@ -22,6 +22,7 @@ interface Account {
 	proxy_id: number | null;
 	proxy_label: string | null;
 	kid_count: number;
+	created_at: string;
 }
 
 export function Accounts() {
@@ -130,7 +131,7 @@ export function Accounts() {
 					<thead>
 						<tr>
 							<th>ID</th><th>邮箱 / 备注</th><th>组</th><th>tier</th><th>状态</th>
-							<th>容量</th><th>绑定keys</th><th>×</th><th>优先级</th><th>到期</th><th>5h%</th><th>7d%</th><th>代理</th><th>操作</th>
+							<th>容量</th><th>绑定keys</th><th>×</th><th>优先级</th><th>到期</th><th>5h%</th><th>7d%</th><th>代理</th><th>添加时间</th><th>操作</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -232,6 +233,7 @@ export function Accounts() {
 								<td>{a.usage_5h_pct?.toFixed(0) ?? "-"}</td>
 								<td>{a.usage_7d_pct?.toFixed(0) ?? "-"}</td>
 								<td className="mono truncate">{a.proxy_label ?? "-"}</td>
+								<td className="mono">{a.created_at.slice(0, 10)}</td>
 								<td>
 									<div className="row" style={{ gap: 4 }}>
 										<button className="ghost" onClick={() => setEditing(a)}>编辑</button>
