@@ -302,7 +302,11 @@ async function probeAndMark(db: DB, env: Env, accountId: number): Promise<void> 
 	if (row.provider === "gpt") {
 		if (!row.third_party_api_url) return;
 		probeUrl = row.third_party_api_url.replace(/\/$/, "");
-		probeBody = JSON.stringify({ model: "gpt-5.4", messages: [{ role: "user", content: "hi" }] });
+		probeBody = JSON.stringify({
+			model: "gpt-5.5",
+			input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }],
+			max_output_tokens: 1,
+		});
 		probeHeaders = { "content-type": "application/json", "authorization": `Bearer ${row.access_token}` };
 	} else {
 		const apiBase = (row.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");

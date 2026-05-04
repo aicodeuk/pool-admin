@@ -53,7 +53,11 @@ export async function syncStatus(env: Env, batch = 50): Promise<{ tried: number;
 		if (r.provider === "gpt") {
 			if (!r.third_party_api_url) continue;
 			probeUrl = r.third_party_api_url.replace(/\/$/, "");
-			probePayload = JSON.stringify({ model: "gpt-5.4", messages: [{ role: "user", content: "hi" }] });
+			probePayload = JSON.stringify({
+				model: "gpt-5.5",
+				input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }],
+				max_output_tokens: 1,
+			});
 			probeHeaders = { "content-type": "application/json", "authorization": `Bearer ${r.access_token}` };
 		} else {
 			const apiBase = (r.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");

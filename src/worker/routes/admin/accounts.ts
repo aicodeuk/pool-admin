@@ -212,7 +212,11 @@ accountRoutes.post("/:id{[0-9]+}/test", async (c) => {
 	if (isGpt) {
 		if (!row.third_party_api_url) return c.json({ error: "GPT account missing third_party_api_url" }, 400);
 		requestUrl = row.third_party_api_url.replace(/\/$/, "");
-		requestPayload = { model: "gpt-5.4", messages: [{ role: "user", content: "hi" }] };
+		requestPayload = {
+			model: "gpt-5.5",
+			input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }],
+			max_output_tokens: 1,
+		};
 		reqHeaders = { "content-type": "application/json", "authorization": `Bearer ${row.access_token}` };
 	} else {
 		const apiBase = (row.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");
