@@ -66,7 +66,7 @@ export function Accounts() {
 		const edit = override ?? inlineEdit;
 		if (!edit) return;
 		setInlineEdit(null);
-		const numFields = ["multiplier", "priority"];
+		const numFields = ["multiplier", "priority", "total_capacity"];
 		const coerced = numFields.includes(edit.field) ? Number(edit.value) : (edit.value || null);
 		await api.patch(`/api/admin/accounts/${edit.id}`, { [edit.field]: coerced });
 		reload();
@@ -193,7 +193,24 @@ export function Accounts() {
 									)}
 								</td>
 								<td><span className={`badge ${a.status}`}>{a.status}</span></td>
-								<td>{a.used_count}/{a.total_capacity}</td>
+								<td>
+									{a.used_count}/
+									{inlineEdit?.id === a.id && inlineEdit.field === "total_capacity" ? (
+										<input
+											autoFocus
+											type="number"
+											min="0"
+											className="inline-input"
+											style={{ width: 56 }}
+											value={inlineEdit.value}
+											onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+											onBlur={() => commitInline()}
+											onKeyDown={(e) => { if (e.key === "Enter") commitInline(); if (e.key === "Escape") setInlineEdit(null); }}
+										/>
+									) : (
+										<span className="inline-cell" onClick={() => startInline(a.id, "total_capacity", String(a.total_capacity))}>{a.total_capacity}</span>
+									)}
+								</td>
 								<td>{a.kid_count}</td>
 								<td>
 									{inlineEdit?.id === a.id && inlineEdit.field === "multiplier" ? (

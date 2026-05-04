@@ -99,7 +99,7 @@ accountRoutes.post("/", async (c) => {
 		body.user_id ?? null,
 		body.multiplier ?? 4.0,
 		body.tier ?? "pro",
-		body.total_capacity ?? 10,
+		body.total_capacity ?? 100,
 		body.status ?? "active",
 		body.is_third_party ?? 0,
 		body.third_party_api_url ?? null,
