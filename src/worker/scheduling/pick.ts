@@ -54,7 +54,7 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 		return { ok: true, response: list[0] ?? emptyResponse() };
 	}
 
-	// 1. group binding
+	// 1. exact group binding (highest priority)
 	const binding = await one<{ group_name: string }>(
 		db,
 		`SELECT group_name FROM kid_groups WHERE kid = ?`,
@@ -62,39 +62,24 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	);
 
 	if (binding?.group_name) {
-		// Prefer the kid's current mapped account if it's still in the same group and active.
-		// Only pick a new random group account if the mapping is missing, stale, or force-replaced.
-		if (!forceReplace) {
-			const existingMapping = await one<{ account_id: number }>(
-				db,
-				`SELECT account_id FROM kid_mappings WHERE kid = ? AND provider = ?`,
-				kid,
-				provider,
-			);
-			if (existingMapping) {
-				const existingAccount = await one<AccountWithProxy>(
-					db,
-					`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
-					 WHERE a.id = ? AND a.group_name = ? AND a.status = 'active' AND a.deleted_at IS NULL`,
-					existingMapping.account_id,
-					binding.group_name,
-				);
-				if (existingAccount && satisfiesIsMax(existingAccount, isMax ?? null)) {
-					ctx.waitUntil(run(db, `UPDATE kid_mappings SET updated_at = ? WHERE kid = ? AND provider = ?`, nowDateTime(), kid, provider));
-					return { ok: true, response: formatResponse(existingAccount, true) };
-				}
-			}
-		}
+		const r = await tryGroupAssign(db, kid, provider, binding.group_name, forceReplace ?? false, isMax ?? null, excludeId, ctx);
+		if (r !== null) return r;
+		// non-channel group: fall through
+	}
 
-		const account = await findAccountByGroup(db, provider, binding.group_name, isMax ?? null, excludeId);
-		if (account) {
-			await upsertMapping(db, kid, provider, account.id);
-			return { ok: true, response: formatResponse(account, true) };
+	// 1.5 range-based group binding
+	if (!binding?.group_name) {
+		const rangeRow = await one<{ group_name: string }>(
+			db,
+			`SELECT group_name FROM kid_group_ranges WHERE kid_from <= ? AND kid_to >= ? ORDER BY priority DESC, id ASC LIMIT 1`,
+			kid,
+			kid,
+		);
+		if (rangeRow?.group_name) {
+			const r = await tryGroupAssign(db, kid, provider, rangeRow.group_name, forceReplace ?? false, isMax ?? null, excludeId, ctx);
+			if (r !== null) return r;
+			// non-channel group: fall through
 		}
-		if (binding.group_name.startsWith("channel_")) {
-			return { ok: false, status: 404, error: "No available accounts in channel group", details: `group=${binding.group_name}` };
-		}
-		// Non-channel groups fall through to shared pool when no active account found.
 	}
 
 	// 2. existing mapping
@@ -163,6 +148,50 @@ async function loadAccount(db: DB, id: number): Promise<AccountWithProxy | null>
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN} WHERE a.id = ? AND a.deleted_at IS NULL`,
 		id,
 	);
+}
+
+async function tryGroupAssign(
+	db: DB,
+	kid: number,
+	provider: Provider,
+	groupName: string,
+	forceReplace: boolean,
+	isMax: 0 | 1 | null,
+	excludeId: number,
+	ctx: { waitUntil(p: Promise<unknown>): void },
+): Promise<{ ok: true; response: AccountResponse } | { ok: false; status: number; error: string; details?: string } | null> {
+	// Prefer the kid's current mapped account if still in the same group and active.
+	if (!forceReplace) {
+		const existingMapping = await one<{ account_id: number }>(
+			db,
+			`SELECT account_id FROM kid_mappings WHERE kid = ? AND provider = ?`,
+			kid,
+			provider,
+		);
+		if (existingMapping) {
+			const existingAccount = await one<AccountWithProxy>(
+				db,
+				`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
+				 WHERE a.id = ? AND a.group_name = ? AND a.status = 'active' AND a.deleted_at IS NULL`,
+				existingMapping.account_id,
+				groupName,
+			);
+			if (existingAccount && satisfiesIsMax(existingAccount, isMax)) {
+				ctx.waitUntil(run(db, `UPDATE kid_mappings SET updated_at = ? WHERE kid = ? AND provider = ?`, nowDateTime(), kid, provider));
+				return { ok: true, response: formatResponse(existingAccount, true) };
+			}
+		}
+	}
+
+	const account = await findAccountByGroup(db, provider, groupName, isMax, excludeId);
+	if (account) {
+		await upsertMapping(db, kid, provider, account.id);
+		return { ok: true, response: formatResponse(account, true) };
+	}
+	if (groupName.startsWith("channel_")) {
+		return { ok: false, status: 404, error: "No available accounts in channel group", details: `group=${groupName}` };
+	}
+	return null; // non-channel: caller falls through to shared pool
 }
 
 async function findAccountByGroup(
