@@ -62,6 +62,29 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	);
 
 	if (binding?.group_name) {
+		// Prefer the kid's current mapped account if it's still in the same group and active.
+		// Only pick a new random group account if the mapping is missing, stale, or force-replaced.
+		if (!forceReplace) {
+			const existingMapping = await one<{ account_id: number }>(
+				db,
+				`SELECT account_id FROM kid_mappings WHERE kid = ? AND provider = ?`,
+				kid,
+				provider,
+			);
+			if (existingMapping) {
+				const existingAccount = await one<AccountWithProxy>(
+					db,
+					`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
+					 WHERE a.id = ? AND a.group_name = ? AND a.status = 'active' AND a.deleted_at IS NULL`,
+					existingMapping.account_id,
+					binding.group_name,
+				);
+				if (existingAccount && satisfiesIsMax(existingAccount, isMax ?? null)) {
+					return { ok: true, response: formatResponse(existingAccount, true) };
+				}
+			}
+		}
+
 		const account = await findAccountByGroup(db, provider, binding.group_name, isMax ?? null, excludeId);
 		if (account) {
 			await upsertMapping(db, kid, provider, account.id);

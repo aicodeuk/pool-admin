@@ -24,8 +24,6 @@
 	],
 	"vars": {
 		"ADMIN_USERNAME": "admin",
-		"API_SECRET_KEY": "change-me-claude",
-		"GPT_API_SECRET_KEY": "change-me-gpt",
 		"DEFAULT_ACCOUNT_IDS": "",
 		"DEFAULT_GPT_ACCOUNT_IDS": ""
 	},
