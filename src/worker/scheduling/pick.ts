@@ -275,13 +275,14 @@ async function scheduleProblemProbe(
 
 async function probeAndMark(db: DB, env: Env, accountId: number): Promise<void> {
 	const row = await one<{
+		provider: string;
 		access_token: string | null;
 		third_party_api_url: string | null;
 		px_host: string | null; px_port: number | null;
 		px_user: string | null; px_pass: string | null; px_scheme: string | null;
 	}>(
 		db,
-		`SELECT a.access_token, a.third_party_api_url,
+		`SELECT a.provider, a.access_token, a.third_party_api_url,
 		        p.host AS px_host, p.port AS px_port,
 		        p.username AS px_user, p.password AS px_pass, p.scheme AS px_scheme
 		 FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id AND p.is_active = 1
@@ -294,22 +295,31 @@ async function probeAndMark(db: DB, env: Env, accountId: number): Promise<void> 
 		? { host: row.px_host, port: row.px_port, username: row.px_user, password: row.px_pass, scheme: (row.px_scheme as "http" | "socks5") ?? "http" }
 		: null;
 
-	const apiBase = (row.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");
-	const isApiKey = row.access_token.startsWith("sk-") || row.access_token.startsWith("sk_");
-	const headers: Record<string, string> = {
-		"content-type": "application/json",
-		"anthropic-version": "2023-06-01",
-		...(isApiKey ? { "x-api-key": row.access_token } : { authorization: `Bearer ${row.access_token}` }),
-	};
+	let probeUrl: string;
+	let probeBody: string;
+	let probeHeaders: Record<string, string>;
+
+	if (row.provider === "gpt") {
+		if (!row.third_party_api_url) return;
+		probeUrl = row.third_party_api_url.replace(/\/$/, "");
+		probeBody = JSON.stringify({ model: "gpt-5.4", messages: [{ role: "user", content: "hi" }] });
+		probeHeaders = { "content-type": "application/json", "authorization": `Bearer ${row.access_token}` };
+	} else {
+		const apiBase = (row.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");
+		const isApiKey = row.access_token.startsWith("sk-") || row.access_token.startsWith("sk_");
+		probeUrl = `${apiBase}/v1/messages`;
+		probeBody = JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1, messages: [{ role: "user", content: "hi" }] });
+		probeHeaders = {
+			"content-type": "application/json",
+			"anthropic-version": "2023-06-01",
+			...(isApiKey ? { "x-api-key": row.access_token } : { authorization: `Bearer ${row.access_token}` }),
+		};
+	}
 
 	try {
 		const resp = await proxyFetch(
 			env,
-			new Request(`${apiBase}/v1/messages`, {
-				method: "POST",
-				headers,
-				body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
-			}),
+			new Request(probeUrl, { method: "POST", headers: probeHeaders, body: probeBody }),
 			proxy,
 		);
 		if (!resp.ok) {

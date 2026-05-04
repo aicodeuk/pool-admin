@@ -202,26 +202,27 @@ accountRoutes.post("/:id{[0-9]+}/test", async (c) => {
 		? { host: row.proxy_host, port: row.proxy_port!, username: row.proxy_username, password: row.proxy_password, scheme: (row.proxy_scheme ?? "http") as "http" | "socks5" }
 		: null;
 
-	const apiBase = (row.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");
-	const isApiKey = row.access_token.startsWith("sk-") || row.access_token.startsWith("sk_");
-
-	const reqHeaders: Record<string, string> = {
-		"content-type": "application/json",
-		"anthropic-version": "2023-06-01",
-	};
-	if (isApiKey) {
-		reqHeaders["x-api-key"] = row.access_token;
-	} else {
-		reqHeaders["authorization"] = `Bearer ${row.access_token}`;
-	}
-
-	const requestUrl = `${apiBase}/v1/messages`;
-	const requestPayload = {
-		model: "claude-haiku-4-5-20251001",
-		max_tokens: 1,
-		messages: [{ role: "user", content: "hi" }],
-	};
 	const proxyDisplay = row.proxy_host ? `${row.proxy_scheme ?? "http"}://${row.proxy_host}:${row.proxy_port}` : null;
+	const isGpt = row.provider === "gpt";
+
+	let requestUrl: string;
+	let requestPayload: unknown;
+	let reqHeaders: Record<string, string>;
+
+	if (isGpt) {
+		if (!row.third_party_api_url) return c.json({ error: "GPT account missing third_party_api_url" }, 400);
+		requestUrl = row.third_party_api_url.replace(/\/$/, "");
+		requestPayload = { model: "gpt-5.4", messages: [{ role: "user", content: "hi" }] };
+		reqHeaders = { "content-type": "application/json", "authorization": `Bearer ${row.access_token}` };
+	} else {
+		const apiBase = (row.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");
+		const isApiKey = row.access_token.startsWith("sk-") || row.access_token.startsWith("sk_");
+		requestUrl = `${apiBase}/v1/messages`;
+		requestPayload = { model: "claude-haiku-4-5-20251001", max_tokens: 1, messages: [{ role: "user", content: "hi" }] };
+		reqHeaders = { "content-type": "application/json", "anthropic-version": "2023-06-01" };
+		if (isApiKey) reqHeaders["x-api-key"] = row.access_token;
+		else reqHeaders["authorization"] = `Bearer ${row.access_token}`;
+	}
 
 	let resp: Response;
 	let body: string;

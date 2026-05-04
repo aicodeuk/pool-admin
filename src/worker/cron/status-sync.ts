@@ -21,12 +21,12 @@ const PROBE_PAYLOAD = JSON.stringify({
 
 export async function syncStatus(env: Env, batch = 50): Promise<{ tried: number; recovered: number }> {
 	const rows = await all<{
-		id: number; access_token: string | null; status: string;
+		id: number; provider: string; access_token: string | null; status: string;
 		third_party_api_url: string | null;
 		px_host: string | null; px_port: number | null; px_user: string | null; px_pass: string | null; px_scheme: string | null;
 	}>(
 		env.DB,
-		`SELECT a.id, a.access_token, a.status, a.third_party_api_url,
+		`SELECT a.id, a.provider, a.access_token, a.status, a.third_party_api_url,
 		        p.host AS px_host, p.port AS px_port, p.username AS px_user, p.password AS px_pass, p.scheme AS px_scheme
 		 FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id AND p.is_active = 1
 		 WHERE a.deleted_at IS NULL
@@ -46,19 +46,32 @@ export async function syncStatus(env: Env, batch = 50): Promise<{ tried: number;
 			? { host: r.px_host, port: r.px_port, username: r.px_user, password: r.px_pass, scheme: (r.px_scheme as "http" | "socks5") ?? "http" }
 			: null;
 
-		const apiBase = (r.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");
-		const isApiKey = r.access_token.startsWith("sk-") || r.access_token.startsWith("sk_");
-		const headers: Record<string, string> = {
-			"content-type": "application/json",
-			"anthropic-version": "2023-06-01",
-			...(isApiKey ? { "x-api-key": r.access_token } : { authorization: `Bearer ${r.access_token}` }),
-		};
+		let probeUrl: string;
+		let probePayload: string;
+		let probeHeaders: Record<string, string>;
+
+		if (r.provider === "gpt") {
+			if (!r.third_party_api_url) continue;
+			probeUrl = r.third_party_api_url.replace(/\/$/, "");
+			probePayload = JSON.stringify({ model: "gpt-5.4", messages: [{ role: "user", content: "hi" }] });
+			probeHeaders = { "content-type": "application/json", "authorization": `Bearer ${r.access_token}` };
+		} else {
+			const apiBase = (r.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");
+			const isApiKey = r.access_token.startsWith("sk-") || r.access_token.startsWith("sk_");
+			probeUrl = `${apiBase}/v1/messages`;
+			probePayload = PROBE_PAYLOAD;
+			probeHeaders = {
+				"content-type": "application/json",
+				"anthropic-version": "2023-06-01",
+				...(isApiKey ? { "x-api-key": r.access_token } : { authorization: `Bearer ${r.access_token}` }),
+			};
+		}
 
 		const ts = nowDateTime();
 		try {
 			const resp = await proxyFetch(
 				env,
-				new Request(`${apiBase}/v1/messages`, { method: "POST", headers, body: PROBE_PAYLOAD }),
+				new Request(probeUrl, { method: "POST", headers: probeHeaders, body: probePayload }),
 				proxy,
 			);
 			const body = await resp.text().catch(() => "");
