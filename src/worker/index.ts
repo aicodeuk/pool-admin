@@ -17,6 +17,7 @@ import { claudeSync, geminiSync, gptSync } from "./routes/v2/sync";
 import { refreshExpiringTokens } from "./cron/token-refresh";
 import { syncUsage } from "./cron/usage-sync";
 import { syncStatus } from "./cron/status-sync";
+import { cleanupStaleMappings } from "./cron/mapping-cleanup";
 import { runJob } from "./cron/log";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -60,6 +61,7 @@ export default {
 						await runJob(env, "token_refresh", () => refreshExpiringTokens(env));
 					} else if (cron === "*/30 * * * *") {
 						await runJob(env, "usage_sync", () => syncUsage(env));
+						await runJob(env, "mapping_cleanup", () => cleanupStaleMappings(env));
 					}
 				} catch (e) {
 					console.error(`cron ${cron} failed:`, e);
