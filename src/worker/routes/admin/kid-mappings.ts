@@ -18,16 +18,26 @@ kidMappingRoutes.get("/", async (c) => {
 		where.push("m.kid = ?");
 		args.push(Number(kid));
 	}
-	const rows = await all(
-		c.env.DB,
-		`SELECT m.id, m.kid, m.provider, m.account_id, m.created_at, m.updated_at,
-		        a.email, a.group_name, a.tier
-		 FROM kid_mappings m LEFT JOIN accounts a ON a.id = m.account_id
-		 ${where.length ? "WHERE " + where.join(" AND ") : ""}
-		 ORDER BY m.updated_at DESC LIMIT 500`,
-		...args,
-	);
-	return c.json({ items: rows });
+	const [rows, stats] = await Promise.all([
+		all(
+			c.env.DB,
+			`SELECT m.id, m.kid, m.provider, m.account_id, m.created_at, m.updated_at,
+			        a.email, a.group_name, a.tier
+			 FROM kid_mappings m LEFT JOIN accounts a ON a.id = m.account_id
+			 ${where.length ? "WHERE " + where.join(" AND ") : ""}
+			 ORDER BY m.updated_at DESC LIMIT 500`,
+			...args,
+		),
+		one<{ live: number; hour: number; today: number }>(
+			c.env.DB,
+			`SELECT
+			   SUM(CASE WHEN updated_at >= strftime('%Y-%m-%d %H:%M:%S', datetime('now', '-10 minutes')) THEN 1 ELSE 0 END) AS live,
+			   SUM(CASE WHEN updated_at >= strftime('%Y-%m-%d %H:%M:%S', datetime('now', '-1 hour'))    THEN 1 ELSE 0 END) AS hour,
+			   SUM(CASE WHEN updated_at >= strftime('%Y-%m-%d', 'now')                                  THEN 1 ELSE 0 END) AS today
+			 FROM kid_mappings`,
+		),
+	]);
+	return c.json({ items: rows, stats: { live: stats?.live ?? 0, hour: stats?.hour ?? 0, today: stats?.today ?? 0 } });
 });
 
 kidMappingRoutes.delete("/:id{[0-9]+}", async (c) => {

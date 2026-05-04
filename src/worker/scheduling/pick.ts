@@ -80,6 +80,7 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 					binding.group_name,
 				);
 				if (existingAccount && satisfiesIsMax(existingAccount, isMax ?? null)) {
+					ctx.waitUntil(run(db, `UPDATE kid_mappings SET updated_at = ? WHERE kid = ? AND provider = ?`, nowDateTime(), kid, provider));
 					return { ok: true, response: formatResponse(existingAccount, true) };
 				}
 			}
@@ -106,6 +107,7 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	if (mapping && !forceReplace) {
 		const existing = await loadAccount(db, mapping.account_id);
 		if (existing && satisfiesIsMax(existing, isMax ?? null) && existing.status === "active") {
+			ctx.waitUntil(run(db, `UPDATE kid_mappings SET updated_at = ? WHERE kid = ? AND provider = ?`, nowDateTime(), kid, provider));
 			return { ok: true, response: formatResponse(existing, false) };
 		}
 	}
