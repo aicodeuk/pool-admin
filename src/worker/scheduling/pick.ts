@@ -68,8 +68,10 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 			await upsertMapping(db, kid, provider, account.id);
 			return { ok: true, response: formatResponse(account, true) };
 		}
-		// Group has a binding but no active account available — never fall through to shared pool.
-		return { ok: false, status: 404, error: "No available accounts in group", details: `group=${binding.group_name}` };
+		if (binding.group_name.startsWith("channel_")) {
+			return { ok: false, status: 404, error: "No available accounts in channel group", details: `group=${binding.group_name}` };
+		}
+		// Non-channel groups fall through to shared pool when no active account found.
 	}
 
 	// 2. existing mapping
