@@ -11,7 +11,6 @@ import {
 import { nowDateTime } from "../lib/time";
 import { proxyConfigToUrl, proxyFetch, type ProxyConfig } from "../lib/proxy-fetch";
 
-const PROBE_URL = "https://api.anthropic.com/api/oauth/usage";
 const PROBE_DEBOUNCE_MS = 3 * 60 * 1000; // 3 minutes
 type AccountWithProxy = AccountRow & {
 	px_id: number | null;
@@ -252,35 +251,55 @@ async function scheduleProblemProbe(
 async function probeAndMark(db: DB, env: Env, accountId: number): Promise<void> {
 	const row = await one<{
 		access_token: string | null;
+		third_party_api_url: string | null;
 		px_host: string | null; px_port: number | null;
 		px_user: string | null; px_pass: string | null; px_scheme: string | null;
 	}>(
 		db,
-		`SELECT a.access_token, p.host AS px_host, p.port AS px_port,
+		`SELECT a.access_token, a.third_party_api_url,
+		        p.host AS px_host, p.port AS px_port,
 		        p.username AS px_user, p.password AS px_pass, p.scheme AS px_scheme
 		 FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id AND p.is_active = 1
 		 WHERE a.id = ? AND a.deleted_at IS NULL`,
 		accountId,
 	);
-	if (!row) return;
+	if (!row || !row.access_token) return;
 
 	const proxy: ProxyConfig | null = row.px_host && row.px_port
 		? { host: row.px_host, port: row.px_port, username: row.px_user, password: row.px_pass, scheme: (row.px_scheme as "http" | "socks5") ?? "http" }
 		: null;
 
+	const apiBase = (row.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");
+	const isApiKey = row.access_token.startsWith("sk-") || row.access_token.startsWith("sk_");
+	const headers: Record<string, string> = {
+		"content-type": "application/json",
+		"anthropic-version": "2023-06-01",
+		...(isApiKey ? { "x-api-key": row.access_token } : { authorization: `Bearer ${row.access_token}` }),
+	};
+
 	try {
-		const resp = await proxyFetch(env, PROBE_URL, proxy, {
-			headers: row.access_token
-				? { Authorization: `Bearer ${row.access_token}`, "User-Agent": "axios/1.13.4" }
-				: { "User-Agent": "axios/1.13.4" },
-		});
-		// 401 = token issue but proxy/network is fine — don't mark as problem
-		if (!resp.ok && resp.status !== 401) {
+		const resp = await proxyFetch(
+			env,
+			new Request(`${apiBase}/v1/messages`, {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
+			}),
+			proxy,
+		);
+		if (!resp.ok) {
+			const body = await resp.text().catch(() => "");
+			let reason = `HTTP ${resp.status}`;
+			try {
+				const parsed = JSON.parse(body) as Record<string, unknown>;
+				const msg = ((parsed.error as Record<string, unknown>)?.message ?? "") as string;
+				if (msg) reason = msg.slice(0, 300);
+			} catch { /* ignore */ }
 			const ts = nowDateTime();
 			await run(
 				db,
 				`UPDATE accounts SET status = 'problem', status_reason = ?, status_changed_at = ?, updated_at = ? WHERE id = ?`,
-				`HTTP ${resp.status} (probe confirmed client report)`, ts, ts, accountId,
+				`${reason} (probe confirmed client report)`, ts, ts, accountId,
 			);
 		}
 	} catch (e) {
