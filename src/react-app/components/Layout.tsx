@@ -16,6 +16,7 @@ const NAV: NavItem[] = [
 	{ id: "cron", label: "定时任务" },
 	{ id: "docs", label: "接口文档" },
 	{ id: "audit", label: "审计" },
+	{ id: "sync-logs", label: "请求日志" },
 ];
 
 interface Props {

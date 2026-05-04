@@ -10,6 +10,7 @@ import { kidMappingRoutes } from "./routes/admin/kid-mappings";
 import { auditRoutes } from "./routes/admin/audit";
 import { onboardRoutes } from "./routes/admin/onboard";
 import { cronRoutes } from "./routes/admin/cron";
+import { syncLogRoutes } from "./routes/admin/sync-logs";
 import { claudeSync, geminiSync, gptSync } from "./routes/v2/sync";
 
 import { refreshExpiringTokens } from "./cron/token-refresh";
@@ -36,6 +37,7 @@ admin.route("/kid-mappings", kidMappingRoutes);
 admin.route("/audit", auditRoutes);
 admin.route("/onboard", onboardRoutes);
 admin.route("/cron", cronRoutes);
+admin.route("/sync-logs", syncLogRoutes);
 app.route("/api/admin", admin);
 
 // V2 sync API (signed, wire-compatible with the original Go service)

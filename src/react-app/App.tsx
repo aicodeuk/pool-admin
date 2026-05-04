@@ -10,6 +10,7 @@ import { Audit } from "./pages/Audit";
 import { Onboard } from "./pages/Onboard";
 import { Cron } from "./pages/Cron";
 import { Docs } from "./pages/Docs";
+import { SyncLogs } from "./pages/SyncLogs";
 import { ApiError, api } from "./lib/api";
 
 function readHash(): string {
@@ -52,6 +53,7 @@ function App() {
 			{page === "cron" && <Cron />}
 			{page === "docs" && <Docs />}
 			{page === "audit" && <Audit />}
+			{page === "sync-logs" && <SyncLogs />}
 		</Layout>
 	);
 }
