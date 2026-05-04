@@ -10,6 +10,7 @@ interface Account {
 	tier: string;
 	status: string;
 	multiplier: number;
+	priority: number;
 	used_count: number;
 	total_capacity: number;
 	available_count: number;
@@ -20,6 +21,7 @@ interface Account {
 	usage_7d_pct: number | null;
 	proxy_id: number | null;
 	proxy_label: string | null;
+	kid_count: number;
 }
 
 export function Accounts() {
@@ -29,6 +31,7 @@ export function Accounts() {
 	const [loading, setLoading] = useState(false);
 	const [editing, setEditing] = useState<Account | null>(null);
 	const [testModal, setTestModal] = useState<{ account: Account; loading: boolean; result: TestResult | null; error: string | null } | null>(null);
+	const [inlineEdit, setInlineEdit] = useState<{ id: number; field: string; value: string } | null>(null);
 
 	const reload = useCallback(async () => {
 		setLoading(true);
@@ -51,6 +54,20 @@ export function Accounts() {
 
 	async function patch(id: number, body: Partial<Account>) {
 		await api.patch(`/api/admin/accounts/${id}`, body);
+		reload();
+	}
+
+	function startInline(id: number, field: string, value: string) {
+		setInlineEdit({ id, field, value });
+	}
+
+	async function commitInline(override?: { id: number; field: string; value: string }) {
+		const edit = override ?? inlineEdit;
+		if (!edit) return;
+		setInlineEdit(null);
+		const numFields = ["multiplier", "priority"];
+		const coerced = numFields.includes(edit.field) ? Number(edit.value) : (edit.value || null);
+		await api.patch(`/api/admin/accounts/${edit.id}`, { [edit.field]: coerced });
 		reload();
 	}
 
@@ -113,7 +130,7 @@ export function Accounts() {
 					<thead>
 						<tr>
 							<th>ID</th><th>邮箱 / 备注</th><th>组</th><th>tier</th><th>状态</th>
-							<th>容量</th><th>×</th><th>到期</th><th>5h%</th><th>7d%</th><th>代理</th><th>操作</th>
+							<th>容量</th><th>绑定keys</th><th>×</th><th>优先级</th><th>到期</th><th>5h%</th><th>7d%</th><th>代理</th><th>操作</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -122,13 +139,95 @@ export function Accounts() {
 								<td>{a.id}</td>
 								<td>
 									<div>{a.email}</div>
-									{a.name && <div className="muted" style={{ fontSize: 11 }}>{a.name}</div>}
+									{inlineEdit?.id === a.id && inlineEdit.field === "name" ? (
+										<input
+											autoFocus
+											className="inline-input"
+											value={inlineEdit.value}
+											onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+											onBlur={() => commitInline()}
+											onKeyDown={(e) => { if (e.key === "Enter") commitInline(); if (e.key === "Escape") setInlineEdit(null); }}
+										/>
+									) : (
+										<div
+											className="muted inline-cell"
+											style={{ fontSize: 11 }}
+											onClick={() => startInline(a.id, "name", a.name ?? "")}
+										>
+											{a.name || <span style={{ opacity: 0.35 }}>+ 备注</span>}
+										</div>
+									)}
 								</td>
-								<td>{a.group_name ?? <span className="muted">-</span>}</td>
-								<td>{a.tier}</td>
+								<td>
+									{inlineEdit?.id === a.id && inlineEdit.field === "group_name" ? (
+										<input
+											autoFocus
+											className="inline-input"
+											value={inlineEdit.value}
+											onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+											onBlur={() => commitInline()}
+											onKeyDown={(e) => { if (e.key === "Enter") commitInline(); if (e.key === "Escape") setInlineEdit(null); }}
+										/>
+									) : (
+										<span className="inline-cell" onClick={() => startInline(a.id, "group_name", a.group_name ?? "")}>
+											{a.group_name ?? <span className="muted">-</span>}
+										</span>
+									)}
+								</td>
+								<td>
+									{inlineEdit?.id === a.id && inlineEdit.field === "tier" ? (
+										<select
+											autoFocus
+											className="inline-input"
+											value={inlineEdit.value}
+											onChange={(e) => commitInline({ id: a.id, field: "tier", value: e.target.value })}
+											onBlur={() => setInlineEdit(null)}
+										>
+											<option value="free">free</option>
+											<option value="pro">pro</option>
+											<option value="max">max</option>
+										</select>
+									) : (
+										<span className="inline-cell" onClick={() => startInline(a.id, "tier", a.tier)}>{a.tier}</span>
+									)}
+								</td>
 								<td><span className={`badge ${a.status}`}>{a.status}</span></td>
 								<td>{a.used_count}/{a.total_capacity}</td>
-								<td>{a.multiplier}</td>
+								<td>{a.kid_count}</td>
+								<td>
+									{inlineEdit?.id === a.id && inlineEdit.field === "multiplier" ? (
+										<input
+											autoFocus
+											type="number"
+											step="0.1"
+											className="inline-input"
+											style={{ width: 64 }}
+											value={inlineEdit.value}
+											onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+											onBlur={() => commitInline()}
+											onKeyDown={(e) => { if (e.key === "Enter") commitInline(); if (e.key === "Escape") setInlineEdit(null); }}
+										/>
+									) : (
+										<span className="inline-cell" onClick={() => startInline(a.id, "multiplier", String(a.multiplier))}>{a.multiplier}</span>
+									)}
+								</td>
+								<td>
+									{inlineEdit?.id === a.id && inlineEdit.field === "priority" ? (
+										<input
+											autoFocus
+											type="number"
+											min="0"
+											className="inline-input"
+											style={{ width: 48 }}
+											value={inlineEdit.value}
+											onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+											onBlur={() => commitInline()}
+											onKeyDown={(e) => { if (e.key === "Enter") commitInline(); if (e.key === "Escape") setInlineEdit(null); }}
+										/>
+									) : (
+										<span className="inline-cell" onClick={() => startInline(a.id, "priority", String(a.priority ?? 0))}>{a.priority ?? 0}</span>
+									)}
+								</td>
 								<td className="mono">{a.expire_date ?? "-"}</td>
 								<td>{a.usage_5h_pct?.toFixed(0) ?? "-"}</td>
 								<td>{a.usage_7d_pct?.toFixed(0) ?? "-"}</td>
@@ -240,6 +339,7 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 		group_name: account.group_name ?? "",
 		tier: account.tier,
 		multiplier: account.multiplier,
+		priority: account.priority ?? 0,
 		total_capacity: account.total_capacity,
 		expire_date: account.expire_date ?? "",
 		proxy_id: account.proxy_id as number | null,
@@ -256,6 +356,7 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 			group_name: form.group_name || null,
 			tier: form.tier,
 			multiplier: Number(form.multiplier),
+			priority: Number(form.priority),
 			total_capacity: Number(form.total_capacity),
 			expire_date: form.expire_date || null,
 			proxy_id: form.proxy_id,
@@ -275,6 +376,7 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 					</select>
 				</div>
 				<div className="field"><label>积分倍率</label><input type="number" step="0.1" value={form.multiplier} onChange={(e) => setForm({ ...form, multiplier: Number(e.target.value) })} /></div>
+				<div className="field"><label>优先级</label><input type="number" min="0" value={form.priority} onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })} /></div>
 				<div className="field"><label>总容量</label><input type="number" value={form.total_capacity} onChange={(e) => setForm({ ...form, total_capacity: Number(e.target.value) })} /></div>
 				<div className="field"><label>到期日 (YYYY-MM-DD)</label><input value={form.expire_date} onChange={(e) => setForm({ ...form, expire_date: e.target.value })} /></div>
 				<div className="field"><label>代理</label>

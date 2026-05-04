@@ -44,9 +44,10 @@ accountRoutes.get("/", async (c) => {
 		args.push(like, like, like);
 	}
 
-	const rows = await all<AccountRow & { proxy_label: string | null }>(
+	const rows = await all<AccountRow & { proxy_label: string | null; kid_count: number }>(
 		c.env.DB,
-		`SELECT a.*, (p.host || ':' || p.port) AS proxy_label
+		`SELECT a.*, (p.host || ':' || p.port) AS proxy_label,
+		        (SELECT COUNT(*) FROM kid_mappings km WHERE km.account_id = a.id) AS kid_count
 		 FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id
 		 WHERE ${where.join(" AND ")}
 		 ORDER BY a.id DESC LIMIT ? OFFSET ?`,
@@ -120,7 +121,7 @@ accountRoutes.patch("/:id{[0-9]+}", async (c) => {
 		"proxy_id", "account_level", "group_name", "user_id", "multiplier", "tier",
 		"total_capacity", "used_count", "status", "status_reason",
 		"is_third_party", "third_party_api_url", "project",
-		"purchase_date", "expire_date",
+		"purchase_date", "expire_date", "priority",
 	] as const;
 
 	const sets: string[] = [];

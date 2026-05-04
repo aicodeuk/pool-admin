@@ -53,7 +53,7 @@ CREATE TABLE accounts (
   account_level               INTEGER NOT NULL DEFAULT 1,
   group_name                  TEXT,
   user_id                     TEXT,                                       -- e.g. user_7f4b...
-  multiplier                  REAL NOT NULL DEFAULT 1.0,
+  multiplier                  REAL NOT NULL DEFAULT 4.0,
   tier                        TEXT NOT NULL DEFAULT 'pro' CHECK(tier IN ('free','pro','max')),
 
   -- Capacity

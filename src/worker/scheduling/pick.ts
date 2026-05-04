@@ -9,11 +9,12 @@ import {
 	type Provider,
 } from "../lib/types";
 import { nowDateTime } from "../lib/time";
-import { proxyConfigToUrl } from "../lib/proxy-fetch";
+import { proxyConfigToUrl, proxyFetch, type ProxyConfig } from "../lib/proxy-fetch";
 
-const ORG_FALLBACK_GROUPS = ["channel_max", "channel_aws_chip", "channel_api"];
+const PROBE_URL = "https://api.anthropic.com/api/oauth/usage";
+const PROBE_DEBOUNCE_MS = 3 * 60 * 1000; // 3 minutes
 
-type GroupKind = "channel" | "org" | "normal";
+type GroupKind = "channel" | "normal";
 
 // Accounts with proxy fields joined inline — avoids a separate SELECT per request.
 type AccountWithProxy = AccountRow & {
@@ -30,7 +31,6 @@ const PROXY_JOIN = `LEFT JOIN proxies p ON a.proxy_id = p.id AND p.is_active = 1
 
 function deriveGroupKind(name: string): GroupKind {
 	if (name.startsWith("channel_")) return "channel";
-	if (name.startsWith("org_")) return "org";
 	return "normal";
 }
 
@@ -40,16 +40,18 @@ interface PickOpts {
 	forceReplace?: boolean;
 	problemAccountId?: number;
 	isMax?: 0 | 1 | null;
+	env: Env;
+	ctx: { waitUntil(p: Promise<unknown>): void };
 }
 
 export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	| { ok: true; response: AccountResponse }
 	| { ok: false; status: number; error: string; details?: string }
 > {
-	const { provider, kid, forceReplace, problemAccountId, isMax } = opts;
+	const { provider, kid, forceReplace, problemAccountId, isMax, env, ctx } = opts;
 
 	if (problemAccountId && forceReplace) {
-		await markAccountProblem(db, problemAccountId);
+		await scheduleProblemProbe(db, env, ctx, problemAccountId);
 	}
 
 	if (kid == null) {
@@ -73,15 +75,6 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 		}
 		if (kind === "channel") {
 			return { ok: false, status: 404, error: "No available accounts in channel group", details: `group=${binding.group_name}` };
-		}
-		if (kind === "org") {
-			// Single query with priority ordering instead of sequential loop.
-			const a = await findAccountByGroups(db, provider, ORG_FALLBACK_GROUPS, isMax ?? null, problemAccountId ?? 0);
-			if (a) {
-				await upsertMapping(db, kid, provider, a.id);
-				return { ok: true, response: formatResponse(a, true) };
-			}
-			return { ok: false, status: 404, error: "org_group_exhausted", details: binding.group_name };
 		}
 		// 'normal' falls through to shared pool selection
 	}
@@ -167,33 +160,9 @@ async function findAccountByGroup(
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
 		 WHERE a.provider = ? AND a.group_name = ? AND a.status = 'active' AND a.deleted_at IS NULL
 		   ${tierClause} ${excludeClause}
-		 ORDER BY a.account_level DESC, RANDOM() LIMIT 1`,
+		 ORDER BY a.account_level DESC, RANDOM() * (a.priority + 1) DESC LIMIT 1`,
 		provider,
 		groupName,
-	);
-}
-
-// Single-query replacement for the sequential org-fallback loop.
-// Preserves priority order of groupNames via CASE ordering.
-async function findAccountByGroups(
-	db: DB,
-	provider: Provider,
-	groupNames: readonly string[],
-	isMax: 0 | 1 | null,
-	excludeId: number,
-): Promise<AccountWithProxy | null> {
-	const tierClause = isMax === 1 ? `AND a.tier = 'max'` : "";
-	const excludeClause = excludeId > 0 ? `AND a.id != ${excludeId | 0}` : "";
-	const placeholders = groupNames.map(() => "?").join(", ");
-	const caseWhen = groupNames.map((g, i) => `WHEN '${g.replace(/'/g, "''")}' THEN ${i}`).join(" ");
-	return one<AccountWithProxy>(
-		db,
-		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
-		 WHERE a.provider = ? AND a.group_name IN (${placeholders}) AND a.status = 'active' AND a.deleted_at IS NULL
-		   ${tierClause} ${excludeClause}
-		 ORDER BY CASE a.group_name ${caseWhen} END, RANDOM() LIMIT 1`,
-		provider,
-		...groupNames,
 	);
 }
 
@@ -213,7 +182,7 @@ async function findSharedAvailable(
 		   AND a.is_third_party = 0
 		   AND a.available_count > 0
 		   ${tierClause} ${excludeClause}
-		 ORDER BY RANDOM() LIMIT 1`,
+		 ORDER BY RANDOM() * (a.priority + 1) DESC LIMIT 1`,
 		provider,
 	);
 }
@@ -260,18 +229,73 @@ async function upsertMapping(
 	}
 }
 
-async function markAccountProblem(db: DB, id: number): Promise<void> {
-	const ts = nowDateTime();
-	await run(
+// Schedule an async probe for a client-reported problem account.
+// Debounced: at most once per PROBE_DEBOUNCE_MS per account.
+// Only marks as problem if the probe actually fails — client reports are not trusted directly.
+async function scheduleProblemProbe(
+	db: DB,
+	env: Env,
+	ctx: { waitUntil(p: Promise<unknown>): void },
+	accountId: number,
+): Promise<void> {
+	const row = await one<{ last_probed_at: string | null }>(
 		db,
-		`UPDATE accounts
-		 SET status = 'problem', status_reason = 'Marked by client (force_replace)',
-		     status_changed_at = ?, updated_at = ?
-		 WHERE id = ?`,
-		ts,
-		ts,
-		id,
+		`SELECT last_probed_at FROM accounts WHERE id = ? AND deleted_at IS NULL`,
+		accountId,
 	);
+	if (!row) return;
+
+	if (row.last_probed_at) {
+		const elapsed = Date.now() - new Date(row.last_probed_at.replace(" ", "T") + "Z").getTime();
+		if (elapsed < PROBE_DEBOUNCE_MS) return;
+	}
+
+	await run(db, `UPDATE accounts SET last_probed_at = ? WHERE id = ?`, nowDateTime(), accountId);
+	ctx.waitUntil(probeAndMark(db, env, accountId));
+}
+
+async function probeAndMark(db: DB, env: Env, accountId: number): Promise<void> {
+	const row = await one<{
+		access_token: string | null;
+		px_host: string | null; px_port: number | null;
+		px_user: string | null; px_pass: string | null; px_scheme: string | null;
+	}>(
+		db,
+		`SELECT a.access_token, p.host AS px_host, p.port AS px_port,
+		        p.username AS px_user, p.password AS px_pass, p.scheme AS px_scheme
+		 FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id AND p.is_active = 1
+		 WHERE a.id = ? AND a.deleted_at IS NULL`,
+		accountId,
+	);
+	if (!row) return;
+
+	const proxy: ProxyConfig | null = row.px_host && row.px_port
+		? { host: row.px_host, port: row.px_port, username: row.px_user, password: row.px_pass, scheme: (row.px_scheme as "http" | "socks5") ?? "http" }
+		: null;
+
+	try {
+		const resp = await proxyFetch(env, PROBE_URL, proxy, {
+			headers: row.access_token
+				? { Authorization: `Bearer ${row.access_token}`, "User-Agent": "axios/1.13.4" }
+				: { "User-Agent": "axios/1.13.4" },
+		});
+		// 401 = token issue but proxy/network is fine — don't mark as problem
+		if (!resp.ok && resp.status !== 401) {
+			const ts = nowDateTime();
+			await run(
+				db,
+				`UPDATE accounts SET status = 'problem', status_reason = ?, status_changed_at = ?, updated_at = ? WHERE id = ?`,
+				`HTTP ${resp.status} (probe confirmed client report)`, ts, ts, accountId,
+			);
+		}
+	} catch (e) {
+		const ts = nowDateTime();
+		await run(
+			db,
+			`UPDATE accounts SET status = 'problem', status_reason = ?, status_changed_at = ?, updated_at = ? WHERE id = ?`,
+			`probe error: ${(e as Error).message}`, ts, ts, accountId,
+		);
+	}
 }
 
 function formatResponse(a: AccountWithProxy, isDedicated: boolean): AccountResponse {

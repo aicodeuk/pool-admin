@@ -36,6 +36,8 @@ function makeHandler(provider: Provider) {
 			forceReplace,
 			problemAccountId: aid ? Number(aid) || undefined : undefined,
 			isMax,
+			env: c.env,
+			ctx: c.executionCtx,
 		});
 		if (!r.ok) return c.json({ error: r.error, details: r.details }, r.status as 400 | 404 | 500);
 		return c.json(r.response);

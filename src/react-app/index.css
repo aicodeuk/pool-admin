@@ -118,6 +118,10 @@ tr:hover td { background: #fafbfc; }
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
 .toolbar input, .toolbar select { width: auto; min-width: 120px; }
 
+.inline-cell { cursor: text; border-radius: 3px; padding: 1px 3px; margin: -1px -3px; }
+.inline-cell:hover { background: #f0f4ff; outline: 1px dashed #93c5fd; }
+.inline-input { padding: 2px 5px !important; height: auto !important; font-size: 12px !important; width: 110px; }
+
 .modal-back { position: fixed; inset: 0; background: rgba(15,23,42,0.5); display: grid; place-items: center; z-index: 50; }
 .modal { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 24px; width: min(560px, 90vw); max-height: 90vh; overflow: auto; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); }
 .modal h3 { margin: 0 0 16px; }
