@@ -90,6 +90,7 @@ tr:hover td { background: #fafbfc; }
 .badge.paused { background: #fffbeb; color: #b45309; }
 .badge.problem { background: #fef2f2; color: #b91c1c; }
 .badge.exhausted { background: #eff6ff; color: #1d4ed8; }
+.badge.terminated { background: #f3f4f6; color: #6b7280; }
 .badge.channel { background: #f5f3ff; color: #6d28d9; }
 .badge.org { background: #ecfeff; color: #0e7490; }
 .badge.normal { background: #f3f4f6; color: #4b5563; }

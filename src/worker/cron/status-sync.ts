@@ -96,7 +96,7 @@ export async function syncStatus(env: Env, batch = 50): Promise<{ tried: number;
 				if (shouldPause(resp.status, reason)) {
 					await run(
 						env.DB,
-						`UPDATE accounts SET status = 'paused', status_reason = ?, status_changed_at = ?, last_test_response = ?, updated_at = ? WHERE id = ?`,
+						`UPDATE accounts SET status = 'exhausted', status_reason = ?, status_changed_at = ?, last_test_response = ?, updated_at = ? WHERE id = ?`,
 						reason, ts, body.slice(0, 500), ts, r.id,
 					);
 				} else {

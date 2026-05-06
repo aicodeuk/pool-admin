@@ -9,6 +9,8 @@ interface Account {
 	group_name: string | null;
 	tier: string;
 	status: string;
+	status_reason: string | null;
+	last_test_response: string | null;
 	multiplier: number;
 	priority: number;
 	used_count: number;
@@ -117,6 +119,7 @@ export function Accounts() {
 					<option value="paused">paused</option>
 					<option value="problem">problem</option>
 					<option value="exhausted">exhausted</option>
+					<option value="terminated">terminated</option>
 				</select>
 				<input
 					placeholder="邮箱 / 备注 / user_id"
@@ -193,7 +196,18 @@ export function Accounts() {
 										<span className="inline-cell" onClick={() => startInline(a.id, "tier", a.tier)}>{a.tier}</span>
 									)}
 								</td>
-								<td><span className={`badge ${a.status}`}>{a.status}</span></td>
+								<td>
+									<span className={`badge ${a.status}`} title={a.last_test_response ?? undefined}>{a.status}</span>
+									{a.status_reason && (
+										<div
+											className="muted"
+											style={{ fontSize: 10, marginTop: 2, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default" }}
+											title={a.last_test_response ?? a.status_reason}
+										>
+											{a.status_reason}
+										</div>
+									)}
+								</td>
 								<td>
 									{a.used_count}/
 									{inlineEdit?.id === a.id && inlineEdit.field === "total_capacity" ? (
@@ -271,6 +285,9 @@ export function Accounts() {
 										{a.status === "problem" && <button className="ghost" onClick={() => clearProblem(a.id)}>恢复</button>}
 										<button className="ghost" onClick={() => patch(a.id, { status: a.status === "paused" ? "active" : "paused" })}>{a.status === "paused" ? "启用" : "停用"}</button>
 										<button className="ghost" onClick={() => resetUsed(a.id)}>重置</button>
+										{a.status !== "terminated" && (
+											<button className="ghost danger" onClick={async () => { if (confirm(`终止账号 #${a.id}？将从列表隐藏，可通过状态搜索找回。`)) await patch(a.id, { status: "terminated" }); }}>终止</button>
+										)}
 										<button className="ghost danger" onClick={() => remove(a.id)}>删</button>
 									</div>
 								</td>

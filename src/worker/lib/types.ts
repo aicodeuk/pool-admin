@@ -1,7 +1,7 @@
 // Domain model row shapes (subset of columns we typically read).
 
 export type Provider = "claude" | "gpt" | "gemini";
-export type AccountStatus = "active" | "paused" | "problem" | "exhausted";
+export type AccountStatus = "active" | "paused" | "problem" | "exhausted" | "terminated";
 export type AccountTier = "free" | "pro" | "max";
 
 export interface ProxyRow {

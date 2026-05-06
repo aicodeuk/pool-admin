@@ -9,7 +9,7 @@ import type { ProxyConfig } from "../../lib/proxy-fetch";
 export const accountRoutes = new Hono<{ Bindings: Env }>();
 
 const PROVIDERS: readonly Provider[] = ["claude", "gpt", "gemini"];
-const STATUSES: readonly AccountStatus[] = ["active", "paused", "problem", "exhausted"];
+const STATUSES: readonly AccountStatus[] = ["active", "paused", "problem", "exhausted", "terminated"];
 
 accountRoutes.get("/", async (c) => {
 	const provider = c.req.query("provider");
@@ -29,6 +29,8 @@ accountRoutes.get("/", async (c) => {
 	if (status && STATUSES.includes(status as AccountStatus)) {
 		where.push("a.status = ?");
 		args.push(status);
+	} else {
+		where.push("a.status != 'terminated'");
 	}
 	if (groupName) {
 		where.push("a.group_name = ?");
@@ -50,7 +52,7 @@ accountRoutes.get("/", async (c) => {
 		        (SELECT COUNT(*) FROM kid_mappings km WHERE km.account_id = a.id) AS kid_count
 		 FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id
 		 WHERE ${where.join(" AND ")}
-		 ORDER BY a.priority DESC, a.id DESC LIMIT ? OFFSET ?`,
+		 ORDER BY CASE WHEN a.status = 'active' THEN 0 ELSE 1 END, a.priority DESC, a.id DESC LIMIT ? OFFSET ?`,
 		...args,
 		limit,
 		offset,
@@ -251,19 +253,26 @@ accountRoutes.post("/:id{[0-9]+}/test", async (c) => {
 		return c.json({ ok: false, status: "problem", status_reason: reason, http_status: null, request_url: requestUrl, proxy: proxyDisplay, request_payload: requestPayload, response_body: null });
 	}
 
+	const LOW_BALANCE_MSGS = ["your credit balance is too low", "this organization has been disabled"];
+
 	let newStatus: AccountStatus;
 	let statusReason: string | null = null;
 
 	if (resp.ok) {
 		newStatus = "active";
 	} else {
-		newStatus = "problem";
 		try {
 			const parsed = JSON.parse(body) as Record<string, unknown>;
 			const msg = ((parsed.error as Record<string, unknown>)?.message ?? parsed.message ?? "") as string;
 			statusReason = msg ? msg.slice(0, 300) : `HTTP ${resp.status}`;
 		} catch {
 			statusReason = `HTTP ${resp.status}`;
+		}
+		const lowerReason = (statusReason ?? "").toLowerCase();
+		if (resp.status === 400 && LOW_BALANCE_MSGS.some((m) => lowerReason.includes(m))) {
+			newStatus = "exhausted";
+		} else {
+			newStatus = "problem";
 		}
 	}
 
