@@ -28,10 +28,10 @@ interface Account {
 	third_party_api_url: string | null;
 }
 
-export function Accounts() {
+export function Accounts({ provider }: { provider: string }) {
 	const [items, setItems] = useState<Account[]>([]);
 	const [total, setTotal] = useState(0);
-	const [filters, setFilters] = useState({ provider: "claude", status: "", q: "" });
+	const [filters, setFilters] = useState({ status: "", q: "" });
 	const [loading, setLoading] = useState(false);
 	const [editing, setEditing] = useState<Account | null>(null);
 	const [testModal, setTestModal] = useState<{ account: Account; loading: boolean; result: TestResult | null; error: string | null } | null>(null);
@@ -41,7 +41,7 @@ export function Accounts() {
 		setLoading(true);
 		try {
 			const params = new URLSearchParams();
-			if (filters.provider) params.set("provider", filters.provider);
+			params.set("provider", provider);
 			if (filters.status) params.set("status", filters.status);
 			if (filters.q) params.set("q", filters.q);
 			const r = await api.get<{ items: Account[]; total: number }>(`/api/admin/accounts?${params}`);
@@ -50,7 +50,7 @@ export function Accounts() {
 		} finally {
 			setLoading(false);
 		}
-	}, [filters]);
+	}, [filters, provider]);
 
 	useEffect(() => {
 		reload();
@@ -105,14 +105,8 @@ export function Accounts() {
 
 	return (
 		<>
-			<h2>账号管理 ({total})</h2>
+			<h2>{provider === "claude" ? "Claude 号池" : "GPT 号池"} ({total})</h2>
 			<div className="toolbar">
-				<select value={filters.provider} onChange={(e) => setFilters({ ...filters, provider: e.target.value })}>
-					<option value="claude">claude</option>
-					<option value="gpt">gpt</option>
-					<option value="gemini">gemini</option>
-					<option value="">全部</option>
-				</select>
 				<select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
 					<option value="">全部状态</option>
 					<option value="active">active</option>

@@ -45,7 +45,8 @@ function App() {
 	return (
 		<Layout current={page} onNavigate={navigate} onLogout={() => setAuthed(false)}>
 			{page === "dashboard" && <Dashboard />}
-			{page === "accounts" && <Accounts />}
+			{page === "claude-accounts" && <Accounts provider="claude" />}
+			{page === "gpt-accounts" && <Accounts provider="gpt" />}
 			{page === "proxies" && <Proxies />}
 			{page === "kid-groups" && <KidGroups />}
 			{page === "kid-mappings" && <KidMappings />}

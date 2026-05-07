@@ -8,7 +8,8 @@ interface NavItem {
 
 const NAV: NavItem[] = [
 	{ id: "dashboard", label: "仪表盘" },
-	{ id: "accounts", label: "账号" },
+	{ id: "claude-accounts", label: "Claude 号池" },
+	{ id: "gpt-accounts", label: "GPT 号池" },
 	{ id: "proxies", label: "代理" },
 	{ id: "kid-groups", label: "Kid 绑定" },
 	{ id: "kid-mappings", label: "Kid 映射" },
