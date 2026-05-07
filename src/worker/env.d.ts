@@ -4,5 +4,8 @@
 declare namespace Cloudflare {
 	interface Env {
 		ADMIN_SECRET: string;
+		ES_URL: string;
+		ES_USERNAME: string;
+		ES_PASSWORD: string;
 	}
 }

@@ -12,6 +12,7 @@ import { auditRoutes } from "./routes/admin/audit";
 import { onboardRoutes } from "./routes/admin/onboard";
 import { cronRoutes } from "./routes/admin/cron";
 import { syncLogRoutes } from "./routes/admin/sync-logs";
+import { esStatsRoutes } from "./routes/admin/es-stats";
 import { claudeSync, geminiSync, gptSync } from "./routes/v2/sync";
 
 import { refreshExpiringTokens } from "./cron/token-refresh";
@@ -41,6 +42,7 @@ admin.route("/audit", auditRoutes);
 admin.route("/onboard", onboardRoutes);
 admin.route("/cron", cronRoutes);
 admin.route("/sync-logs", syncLogRoutes);
+admin.route("/es-stats", esStatsRoutes);
 app.route("/api/admin", admin);
 
 // V2 sync API (signed, wire-compatible with the original Go service)

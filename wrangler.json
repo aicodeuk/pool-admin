@@ -25,7 +25,10 @@
 	"vars": {
 		"ADMIN_USERNAME": "admin",
 		"DEFAULT_ACCOUNT_IDS": "",
-		"DEFAULT_GPT_ACCOUNT_IDS": ""
+		"DEFAULT_GPT_ACCOUNT_IDS": "",
+		"ES_URL": "",
+		"ES_USERNAME": "",
+		"ES_PASSWORD": ""
 	},
 	"services": [
 		{
