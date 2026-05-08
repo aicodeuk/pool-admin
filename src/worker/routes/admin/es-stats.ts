@@ -4,7 +4,7 @@ export const esStatsRoutes = new Hono<{ Bindings: Env }>();
 
 esStatsRoutes.get("/", async (c) => {
 	const { ES_URL, ES_USERNAME, ES_PASSWORD } = c.env;
-	if (!ES_URL) return c.json({ buckets: [], total: 0, unconfigured: true });
+	if (!ES_URL) return c.json({ status_buckets: [], model_buckets: [], total: 0, unconfigured: true });
 
 	const today = new Date().toISOString().slice(0, 10);
 	const index = `request-${today}`;
@@ -20,19 +20,28 @@ esStatsRoutes.get("/", async (c) => {
 			},
 			body: JSON.stringify({
 				size: 0,
-				aggs: { by_status: { terms: { field: "status_code", size: 20 } } },
+				aggs: {
+					by_status: { terms: { field: "status_code", size: 20 } },
+					by_model: { terms: { field: "model.keyword", size: 50 } },
+				},
 			}),
 		});
 	} catch (e) {
 		return c.json({ error: String(e) }, 502);
 	}
 
-	if (res.status === 404) return c.json({ buckets: [], total: 0 });
+	if (res.status === 404) return c.json({ status_buckets: [], model_buckets: [], total: 0 });
 	if (!res.ok) return c.json({ error: await res.text() }, 502);
 
-	const data = await res.json<{ aggregations: { by_status: { buckets: { key: number; doc_count: number }[] } } }>();
-	const buckets = data.aggregations?.by_status?.buckets ?? [];
-	const total = buckets.reduce((a, b) => a + b.doc_count, 0);
+	const data = await res.json<{
+		aggregations: {
+			by_status: { buckets: { key: number; doc_count: number }[] };
+			by_model: { buckets: { key: string; doc_count: number }[] };
+		};
+	}>();
+	const status_buckets = data.aggregations?.by_status?.buckets ?? [];
+	const model_buckets = data.aggregations?.by_model?.buckets ?? [];
+	const total = status_buckets.reduce((a, b) => a + b.doc_count, 0);
 
-	return c.json({ buckets, total });
+	return c.json({ status_buckets, model_buckets, total });
 });

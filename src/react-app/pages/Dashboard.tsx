@@ -11,16 +11,19 @@ interface Stats {
 	high_usage: { id: number; email: string | null; usage_5h_pct: number | null; usage_7d_pct: number | null }[];
 }
 
-interface EsBucket {
-	key: number;
-	doc_count: number;
-}
-
 interface EsStats {
-	buckets: EsBucket[];
+	status_buckets: { key: number; doc_count: number }[];
+	model_buckets: { key: string; doc_count: number }[];
 	total: number;
 	unconfigured?: boolean;
 }
+
+// Distinct color palette for models
+const MODEL_COLORS = [
+	"#6366f1", "#f59e0b", "#10b981", "#3b82f6", "#ec4899",
+	"#14b8a6", "#f97316", "#8b5cf6", "#06b6d4", "#84cc16",
+	"#ef4444", "#a78bfa", "#fb923c", "#34d399", "#60a5fa",
+];
 
 function statusColor(code: number): string {
 	if (code === 200) return "#16a34a";
@@ -30,13 +33,22 @@ function statusColor(code: number): string {
 	return "#6b7280";
 }
 
-function PieChart({ buckets, total }: { buckets: EsBucket[]; total: number }) {
-	if (total === 0) return <div className="muted" style={{ padding: "24px 0" }}>暂无数据</div>;
+interface Slice {
+	key: string | number;
+	count: number;
+	frac: number;
+	color: string;
+	path: string;
+}
 
+function buildSlices(
+	buckets: { key: string | number; doc_count: number }[],
+	total: number,
+	colorFn: (key: string | number, i: number) => string,
+): Slice[] {
 	const cx = 90, cy = 90, r = 76;
 	let angle = -Math.PI / 2;
-
-	const slices = buckets.map((b) => {
+	return buckets.map((b, i) => {
 		const frac = b.doc_count / total;
 		const start = angle;
 		const end = angle + frac * 2 * Math.PI;
@@ -45,26 +57,27 @@ function PieChart({ buckets, total }: { buckets: EsBucket[]; total: number }) {
 		const y1 = cy + r * Math.sin(start);
 		const x2 = cx + r * Math.cos(end);
 		const y2 = cy + r * Math.sin(end);
-		const large = frac > 0.5 ? 1 : 0;
-		return { key: b.key, count: b.doc_count, frac, color: statusColor(b.key), path: `M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z` };
+		return { key: b.key, count: b.doc_count, frac, color: colorFn(b.key, i), path: `M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${frac > 0.5 ? 1 : 0} 1 ${x2},${y2} Z` };
 	});
+}
 
+function PieChart({ slices }: { slices: Slice[] }) {
 	return (
-		<div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
+		<div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
 			<svg viewBox="0 0 180 180" width={160} height={160} style={{ flexShrink: 0 }}>
-				{slices.map((s) => (
-					<path key={s.key} d={s.path} fill={s.color}>
-						<title>{s.key}: {s.count} ({(s.frac * 100).toFixed(1)}%)</title>
+				{slices.map((s, i) => (
+					<path key={i} d={s.path} fill={s.color}>
+						<title>{s.key}: {s.count.toLocaleString()} ({(s.frac * 100).toFixed(1)}%)</title>
 					</path>
 				))}
 			</svg>
-			<div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-				{slices.map((s) => (
-					<div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+			<div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 200, flexWrap: "wrap", columnGap: 24 }}>
+				{slices.map((s, i) => (
+					<div key={i} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12 }}>
 						<span style={{ width: 10, height: 10, borderRadius: 2, background: s.color, flexShrink: 0 }} />
-						<span className="mono" style={{ minWidth: 36 }}>{s.key}</span>
-						<span style={{ color: "#6b7280" }}>{s.count.toLocaleString()}</span>
-						<span style={{ color: "#9ca3af", fontSize: 11 }}>({(s.frac * 100).toFixed(1)}%)</span>
+						<span className="mono" style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.key}</span>
+						<span style={{ color: "#6b7280", flexShrink: 0 }}>{s.count.toLocaleString()}</span>
+						<span style={{ color: "#9ca3af", fontSize: 11, flexShrink: 0 }}>({(s.frac * 100).toFixed(1)}%)</span>
 					</div>
 				))}
 			</div>
@@ -90,9 +103,12 @@ export function Dashboard() {
 	const activeOf = (provider: string) =>
 		byProvider(provider).find((t) => t.status === "active")?.n ?? 0;
 
-	const successCount = esStats?.buckets.find((b) => b.key === 200)?.doc_count ?? 0;
+	const showEs = esStats && !esStats.unconfigured;
+	const successCount = esStats?.status_buckets.find((b) => b.key === 200)?.doc_count ?? 0;
 	const errorCount = esStats ? (esStats.total - successCount) : 0;
-	const successRate = esStats && esStats.total > 0 ? (successCount / esStats.total * 100).toFixed(1) : null;
+
+	const statusSlices = showEs ? buildSlices(esStats.status_buckets, esStats.total, (key) => statusColor(key as number)) : [];
+	const modelSlices = showEs ? buildSlices(esStats.model_buckets, esStats.model_buckets.reduce((a, b) => a + b.doc_count, 0), (_, i) => MODEL_COLORS[i % MODEL_COLORS.length]) : [];
 
 	return (
 		<>
@@ -119,27 +135,37 @@ export function Dashboard() {
 				</div>
 			</div>
 
-			{esStats && !esStats.unconfigured && (
-				<div className="card" style={{ marginTop: 16 }}>
-					<h3 style={{ marginTop: 0 }}>今日请求统计（{new Date().toISOString().slice(0, 10)}）</h3>
-					<div className="stats" style={{ marginBottom: 20 }}>
-						<div className="stat">
-							<div className="label">成功 (200)</div>
-							<div className="value" style={{ color: "#16a34a" }}>{successCount.toLocaleString()}</div>
-							{successRate && <div className="sub">{successRate}%</div>}
+			{showEs && (
+				<>
+					<div className="row" style={{ alignItems: "stretch", marginTop: 16 }}>
+						<div className="card grow">
+							<h3 style={{ marginTop: 0 }}>今日状态码分布（{new Date().toISOString().slice(0, 10)}）</h3>
+							<div style={{ display: "flex", gap: 24, marginBottom: 16 }}>
+								<div>
+									<div style={{ fontSize: 12, color: "#6b7280" }}>成功 (200)</div>
+									<div style={{ fontSize: 22, fontWeight: 600, color: "#16a34a" }}>{successCount.toLocaleString()}</div>
+								</div>
+								<div>
+									<div style={{ fontSize: 12, color: "#6b7280" }}>异常 (&gt;200)</div>
+									<div style={{ fontSize: 22, fontWeight: 600, color: errorCount > 0 ? "#dc2626" : undefined }}>{errorCount.toLocaleString()}</div>
+								</div>
+								<div>
+									<div style={{ fontSize: 12, color: "#6b7280" }}>总计</div>
+									<div style={{ fontSize: 22, fontWeight: 600 }}>{esStats.total.toLocaleString()}</div>
+								</div>
+							</div>
+							<PieChart slices={statusSlices} />
 						</div>
-						<div className="stat">
-							<div className="label">异常 (&gt;200)</div>
-							<div className="value" style={{ color: errorCount > 0 ? "#dc2626" : undefined }}>{errorCount.toLocaleString()}</div>
-							{esStats.total > 0 && <div className="sub">{(errorCount / esStats.total * 100).toFixed(1)}%</div>}
-						</div>
-						<div className="stat">
-							<div className="label">总计</div>
-							<div className="value">{esStats.total.toLocaleString()}</div>
+
+						<div className="card grow">
+							<h3 style={{ marginTop: 0 }}>今日模型调用分布</h3>
+							{modelSlices.length === 0
+								? <div className="muted">暂无数据</div>
+								: <PieChart slices={modelSlices} />
+							}
 						</div>
 					</div>
-					<PieChart buckets={esStats.buckets} total={esStats.total} />
-				</div>
+				</>
 			)}
 
 			<div className="row" style={{ alignItems: "stretch", marginTop: 16 }}>
