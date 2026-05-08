@@ -22,7 +22,14 @@ esStatsRoutes.get("/", async (c) => {
 				size: 0,
 				aggs: {
 					by_status: { terms: { field: "status_code", size: 20 } },
-					by_model: { terms: { field: "model.keyword", size: 50 } },
+					by_model: {
+						terms: { field: "model.keyword", size: 50 },
+						aggs: {
+							input_tokens: { sum: { field: "input_tokens" } },
+							output_tokens: { sum: { field: "output_tokens" } },
+							cache_read_tokens: { sum: { field: "cache_read_input_tokens" } },
+						},
+					},
 				},
 			}),
 		});
@@ -36,7 +43,15 @@ esStatsRoutes.get("/", async (c) => {
 	const data = await res.json<{
 		aggregations: {
 			by_status: { buckets: { key: number; doc_count: number }[] };
-			by_model: { buckets: { key: string; doc_count: number }[] };
+			by_model: {
+				buckets: {
+					key: string;
+					doc_count: number;
+					input_tokens: { value: number };
+					output_tokens: { value: number };
+					cache_read_tokens: { value: number };
+				}[];
+			};
 		};
 	}>();
 	const status_buckets = data.aggregations?.by_status?.buckets ?? [];
