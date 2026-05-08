@@ -27,6 +27,7 @@ esStatsRoutes.get("/", async (c) => {
 						aggs: {
 							input_tokens: { sum: { field: "input_tokens" } },
 							output_tokens: { sum: { field: "output_tokens" } },
+							cache_creation_tokens: { sum: { field: "cache_creation_input_tokens" } },
 							cache_read_tokens: { sum: { field: "cache_read_input_tokens" } },
 						},
 					},
@@ -49,6 +50,7 @@ esStatsRoutes.get("/", async (c) => {
 					doc_count: number;
 					input_tokens: { value: number };
 					output_tokens: { value: number };
+					cache_creation_tokens: { value: number };
 					cache_read_tokens: { value: number };
 				}[];
 			};

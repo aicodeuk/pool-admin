@@ -16,6 +16,7 @@ interface ModelBucket {
 	doc_count: number;
 	input_tokens: { value: number };
 	output_tokens: { value: number };
+	cache_creation_tokens: { value: number };
 	cache_read_tokens: { value: number };
 }
 
@@ -27,20 +28,20 @@ interface EsStats {
 }
 
 // $/MTok pricing — strip date suffix (e.g. -20251001) before matching
-interface Pricing { input: number; output: number; cacheHit: number }
+interface Pricing { input: number; cacheWrite: number; cacheHit: number; output: number }
 
 function getModelPricing(raw: string): Pricing | null {
 	const m = raw.toLowerCase().replace(/-\d{8}$/, "");
 	if (m.includes("opus")) {
-		if (m.match(/opus-4-[567]/)) return { input: 5, output: 25, cacheHit: 0.50 };
-		if (m.includes("opus-4-1") || m === "claude-opus-4") return { input: 15, output: 75, cacheHit: 1.50 };
-		if (m.includes("opus-3")) return { input: 15, output: 75, cacheHit: 1.50 };
+		if (m.match(/opus-4-[567]/)) return { input: 5, cacheWrite: 6.25, cacheHit: 0.50, output: 25 };
+		if (m.includes("opus-4-1") || m === "claude-opus-4") return { input: 15, cacheWrite: 18.75, cacheHit: 1.50, output: 75 };
+		if (m.includes("opus-3")) return { input: 15, cacheWrite: 18.75, cacheHit: 1.50, output: 75 };
 	}
-	if (m.includes("sonnet")) return { input: 3, output: 15, cacheHit: 0.30 };
+	if (m.includes("sonnet")) return { input: 3, cacheWrite: 3.75, cacheHit: 0.30, output: 15 };
 	if (m.includes("haiku")) {
-		if (m.includes("haiku-4-5")) return { input: 1, output: 5, cacheHit: 0.10 };
-		if (m.includes("haiku-3-5")) return { input: 0.80, output: 4, cacheHit: 0.08 };
-		if (m.includes("haiku-3")) return { input: 0.25, output: 1.25, cacheHit: 0.03 };
+		if (m.includes("haiku-4-5")) return { input: 1, cacheWrite: 1.25, cacheHit: 0.10, output: 5 };
+		if (m.includes("haiku-3-5")) return { input: 0.80, cacheWrite: 1, cacheHit: 0.08, output: 4 };
+		if (m.includes("haiku-3")) return { input: 0.25, cacheWrite: 0.30, cacheHit: 0.03, output: 1.25 };
 	}
 	return null;
 }
@@ -49,8 +50,9 @@ function calcCost(b: ModelBucket, p: Pricing): number {
 	const M = 1_000_000;
 	return (
 		(b.input_tokens.value / M) * p.input +
-		(b.output_tokens.value / M) * p.output +
-		(b.cache_read_tokens.value / M) * p.cacheHit
+		(b.cache_creation_tokens.value / M) * p.cacheWrite +
+		(b.cache_read_tokens.value / M) * p.cacheHit +
+		(b.output_tokens.value / M) * p.output
 	);
 }
 
@@ -151,7 +153,7 @@ export function Dashboard() {
 		return { bucket: b, pricing, cost, color: MODEL_COLORS[i % MODEL_COLORS.length] };
 	}) : [];
 	const totalCost = costRows.reduce((a, r) => a + (r.cost ?? 0), 0);
-	const hasTokenData = showEs && esStats.model_buckets.some((b) => b.input_tokens.value > 0 || b.output_tokens.value > 0);
+	const hasTokenData = showEs && esStats.model_buckets.some((b) => b.input_tokens.value > 0 || b.output_tokens.value > 0 || b.cache_creation_tokens.value > 0);
 
 	return (
 		<>
@@ -215,9 +217,10 @@ export function Dashboard() {
 										<th>模型</th>
 										<th style={{ textAlign: "right" }}>请求数</th>
 										<th style={{ textAlign: "right" }}>Input</th>
+										<th style={{ textAlign: "right" }}>Cache Write</th>
 										<th style={{ textAlign: "right" }}>Cache Read</th>
 										<th style={{ textAlign: "right" }}>Output</th>
-										<th style={{ textAlign: "right" }}>单价 (in/out)</th>
+										<th style={{ textAlign: "right" }}>单价 in/cw/cr/out</th>
 										<th style={{ textAlign: "right" }}>费用 ($)</th>
 									</tr>
 								</thead>
@@ -230,10 +233,13 @@ export function Dashboard() {
 											</td>
 											<td style={{ textAlign: "right" }}>{r.bucket.doc_count.toLocaleString()}</td>
 											<td style={{ textAlign: "right" }} className="mono">{fmtTokens(r.bucket.input_tokens.value)}</td>
+											<td style={{ textAlign: "right" }} className="mono">{fmtTokens(r.bucket.cache_creation_tokens.value)}</td>
 											<td style={{ textAlign: "right" }} className="mono">{fmtTokens(r.bucket.cache_read_tokens.value)}</td>
 											<td style={{ textAlign: "right" }} className="mono">{fmtTokens(r.bucket.output_tokens.value)}</td>
-											<td style={{ textAlign: "right", color: "#6b7280", fontSize: 12 }}>
-												{r.pricing ? `$${r.pricing.input}/$${r.pricing.output}` : <span className="muted">未知</span>}
+											<td style={{ textAlign: "right", color: "#6b7280", fontSize: 11 }}>
+												{r.pricing
+													? `$${r.pricing.input}/$${r.pricing.cacheWrite}/$${r.pricing.cacheHit}/$${r.pricing.output}`
+													: <span className="muted">未知</span>}
 											</td>
 											<td style={{ textAlign: "right", fontWeight: 600 }}>
 												{r.cost != null ? `$${r.cost.toFixed(4)}` : <span className="muted">—</span>}
