@@ -222,7 +222,7 @@ accountRoutes.post("/:id{[0-9]+}/test", async (c) => {
 		reqHeaders = { "content-type": "application/json", "authorization": `Bearer ${row.access_token}` };
 	} else {
 		const apiBase = (row.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");
-		const isApiKey = row.access_token.startsWith("sk-") || row.access_token.startsWith("sk_");
+		const isApiKey = row.is_third_party === 1 && (row.access_token.startsWith("sk-") || row.access_token.startsWith("sk_"));
 		requestUrl = `${apiBase}/v1/messages`;
 		requestPayload = { model: "claude-haiku-4-5-20251001", max_tokens: 1, messages: [{ role: "user", content: "hi" }] };
 		reqHeaders = { "content-type": "application/json", "anthropic-version": "2023-06-01" };

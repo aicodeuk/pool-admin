@@ -22,11 +22,11 @@ const PROBE_PAYLOAD = JSON.stringify({
 export async function syncStatus(env: Env, batch = 50): Promise<{ tried: number; recovered: number }> {
 	const rows = await all<{
 		id: number; provider: string; access_token: string | null; status: string;
-		third_party_api_url: string | null;
+		is_third_party: number; third_party_api_url: string | null;
 		px_host: string | null; px_port: number | null; px_user: string | null; px_pass: string | null; px_scheme: string | null;
 	}>(
 		env.DB,
-		`SELECT a.id, a.provider, a.access_token, a.status, a.third_party_api_url,
+		`SELECT a.id, a.provider, a.access_token, a.status, a.is_third_party, a.third_party_api_url,
 		        p.host AS px_host, p.port AS px_port, p.username AS px_user, p.password AS px_pass, p.scheme AS px_scheme
 		 FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id AND p.is_active = 1
 		 WHERE a.deleted_at IS NULL
@@ -61,7 +61,7 @@ export async function syncStatus(env: Env, batch = 50): Promise<{ tried: number;
 			probeHeaders = { "content-type": "application/json", "authorization": `Bearer ${r.access_token}` };
 		} else {
 			const apiBase = (r.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");
-			const isApiKey = r.access_token.startsWith("sk-") || r.access_token.startsWith("sk_");
+			const isApiKey = r.is_third_party === 1 && (r.access_token.startsWith("sk-") || r.access_token.startsWith("sk_"));
 			probeUrl = `${apiBase}/v1/messages`;
 			probePayload = PROBE_PAYLOAD;
 			probeHeaders = {
