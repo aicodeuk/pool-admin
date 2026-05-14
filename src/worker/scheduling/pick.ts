@@ -57,8 +57,9 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	// 1. exact group binding (highest priority)
 	const binding = await one<{ group_name: string }>(
 		db,
-		`SELECT group_name FROM kid_groups WHERE kid = ?`,
+		`SELECT group_name FROM kid_groups WHERE kid = ? AND provider = ?`,
 		kid,
+		provider,
 	);
 
 	if (binding?.group_name) {
@@ -71,9 +72,12 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	if (!binding?.group_name) {
 		const rangeRow = await one<{ group_name: string }>(
 			db,
-			`SELECT group_name FROM kid_group_ranges WHERE kid_from <= ? AND kid_to >= ? ORDER BY priority DESC, id ASC LIMIT 1`,
+			`SELECT group_name FROM kid_group_ranges
+			 WHERE kid_from <= ? AND kid_to >= ? AND provider = ?
+			 ORDER BY priority DESC, id ASC LIMIT 1`,
 			kid,
 			kid,
+			provider,
 		);
 		if (rangeRow?.group_name) {
 			const r = await tryGroupAssign(db, kid, provider, rangeRow.group_name, forceReplace ?? false, isMax ?? null, excludeId, ctx);

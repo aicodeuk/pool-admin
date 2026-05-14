@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 
-interface Row { kid: number; group_name: string; note: string | null; updated_at: string; }
-interface RangeRow { id: number; kid_from: number; kid_to: number; group_name: string; note: string | null; priority: number; created_at: string; }
+type Provider = "claude" | "gpt" | "gemini";
+const PROVIDERS: Provider[] = ["claude", "gpt", "gemini"];
+
+interface Row { kid: number; provider: Provider; group_name: string; note: string | null; updated_at: string; }
+interface RangeRow { id: number; kid_from: number; kid_to: number; provider: Provider; group_name: string; note: string | null; priority: number; created_at: string; }
 
 function kindOf(name: string): string {
 	if (name.startsWith("channel_")) return "channel";
@@ -10,12 +13,12 @@ function kindOf(name: string): string {
 	return "normal";
 }
 
-const EMPTY_RANGE = { kid_from: "", kid_to: "", group_name: "", note: "", priority: "0" };
+const EMPTY_RANGE = { kid_from: "", kid_to: "", provider: "claude" as Provider, group_name: "", note: "", priority: "0" };
 
 export function KidGroups() {
 	const [items, setItems] = useState<Row[]>([]);
 	const [adding, setAdding] = useState(false);
-	const [form, setForm] = useState({ kid: "", group_name: "", note: "" });
+	const [form, setForm] = useState({ kid: "", provider: "claude" as Provider, group_name: "", note: "" });
 
 	const [ranges, setRanges] = useState<RangeRow[]>([]);
 	const [addingRange, setAddingRange] = useState(false);
@@ -35,15 +38,15 @@ export function KidGroups() {
 	async function save() {
 		const kid = Number(form.kid);
 		if (!Number.isFinite(kid) || !form.group_name.trim()) return;
-		await api.put(`/api/admin/kid-groups/${kid}`, { group_name: form.group_name.trim(), note: form.note.trim() || undefined });
-		setForm({ kid: "", group_name: "", note: "" });
+		await api.put(`/api/admin/kid-groups/${kid}/${form.provider}`, { group_name: form.group_name.trim(), note: form.note.trim() || undefined });
+		setForm({ kid: "", provider: "claude", group_name: "", note: "" });
 		setAdding(false);
 		reload();
 	}
 
-	async function remove(kid: number) {
-		if (!confirm(`解绑 kid=${kid}？`)) return;
-		await api.delete(`/api/admin/kid-groups/${kid}`);
+	async function remove(kid: number, provider: Provider) {
+		if (!confirm(`解绑 kid=${kid} (${provider})？`)) return;
+		await api.delete(`/api/admin/kid-groups/${kid}/${provider}`);
 		reload();
 	}
 
@@ -54,6 +57,7 @@ export function KidGroups() {
 		if (to < from) { alert("kid 止 必须 >= kid 起"); return; }
 		const body = {
 			kid_from: from, kid_to: to,
+			provider: rangeForm.provider,
 			group_name: rangeForm.group_name.trim(),
 			note: rangeForm.note.trim() || undefined,
 			priority: Number(rangeForm.priority) || 0,
@@ -70,7 +74,7 @@ export function KidGroups() {
 	}
 
 	function startEditRange(r: RangeRow) {
-		setRangeForm({ kid_from: String(r.kid_from), kid_to: String(r.kid_to), group_name: r.group_name, note: r.note ?? "", priority: String(r.priority) });
+		setRangeForm({ kid_from: String(r.kid_from), kid_to: String(r.kid_to), provider: r.provider, group_name: r.group_name, note: r.note ?? "", priority: String(r.priority) });
 		setEditingRange(r);
 		setAddingRange(true);
 	}
@@ -87,21 +91,22 @@ export function KidGroups() {
 			<div className="toolbar">
 				<button className="primary" onClick={() => setAdding(true)}>+ 绑定</button>
 				<span className="muted" style={{ fontSize: 12 }}>
-					组名为自由文本：以 <code>channel_</code> 开头严格绑定，<code>org_</code> 开头可 fallback，其他为普通组
+					每条规则只对所选 provider 生效；同一个 kid 可对 claude/gpt/gemini 各设一条
 				</span>
 			</div>
 			<div className="card" style={{ padding: 0 }}>
 				<table>
-					<thead><tr><th>kid</th><th>组</th><th>类型</th><th>备注</th><th>更新时间</th><th>操作</th></tr></thead>
+					<thead><tr><th>kid</th><th>provider</th><th>组</th><th>类型</th><th>备注</th><th>更新时间</th><th>操作</th></tr></thead>
 					<tbody>
 						{items.map((r) => (
-							<tr key={r.kid}>
+							<tr key={`${r.kid}-${r.provider}`}>
 								<td>{r.kid}</td>
+								<td><span className="badge">{r.provider}</span></td>
 								<td className="mono">{r.group_name}</td>
 								<td><span className={`badge ${kindOf(r.group_name)}`}>{kindOf(r.group_name)}</span></td>
 								<td className="muted">{r.note ?? "—"}</td>
 								<td className="mono">{r.updated_at}</td>
-								<td><button className="ghost danger" onClick={() => remove(r.kid)}>解绑</button></td>
+								<td><button className="ghost danger" onClick={() => remove(r.kid, r.provider)}>解绑</button></td>
 							</tr>
 						))}
 					</tbody>
@@ -115,6 +120,12 @@ export function KidGroups() {
 						<div className="field">
 							<label>kid (API key id)</label>
 							<input value={form.kid} onChange={(e) => setForm({ ...form, kid: e.target.value })} autoFocus />
+						</div>
+						<div className="field">
+							<label>provider</label>
+							<select value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value as Provider })}>
+								{PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
+							</select>
 						</div>
 						<div className="field">
 							<label>组名（任意字符串）</label>
@@ -150,25 +161,26 @@ export function KidGroups() {
 			<div className="toolbar">
 				<button className="primary" onClick={() => { setRangeForm(EMPTY_RANGE); setEditingRange(null); setAddingRange(true); }}>+ 新增范围</button>
 				<span className="muted" style={{ fontSize: 12 }}>
-					优先级：精确绑定 &gt; 范围规则（priority 大的先匹配）&gt; 兜底 null 组
+					优先级：精确绑定 &gt; 范围规则（priority 大的先匹配）&gt; 兜底 null 组；每条规则只对所选 provider 生效
 				</span>
 			</div>
 			<div className="card" style={{ padding: 0 }}>
 				<table>
 					<thead>
 						<tr>
-							<th>kid 起</th><th>kid 止</th><th>组名</th><th>类型</th>
+							<th>kid 起</th><th>kid 止</th><th>provider</th><th>组名</th><th>类型</th>
 							<th>priority</th><th>备注</th><th>创建时间</th><th>操作</th>
 						</tr>
 					</thead>
 					<tbody>
 						{ranges.length === 0 && (
-							<tr><td colSpan={8} className="muted" style={{ textAlign: "center", padding: 16 }}>暂无范围规则</td></tr>
+							<tr><td colSpan={9} className="muted" style={{ textAlign: "center", padding: 16 }}>暂无范围规则</td></tr>
 						)}
 						{ranges.map((r) => (
 							<tr key={r.id}>
 								<td className="mono">{r.kid_from}</td>
 								<td className="mono">{r.kid_to}</td>
+								<td><span className="badge">{r.provider}</span></td>
 								<td className="mono">{r.group_name}</td>
 								<td><span className={`badge ${kindOf(r.group_name)}`}>{kindOf(r.group_name)}</span></td>
 								<td>{r.priority}</td>
@@ -199,6 +211,12 @@ export function KidGroups() {
 								<label>kid 止（含）</label>
 								<input type="number" min="0" value={rangeForm.kid_to} onChange={(e) => setRangeForm({ ...rangeForm, kid_to: e.target.value })} />
 							</div>
+						</div>
+						<div className="field">
+							<label>provider</label>
+							<select value={rangeForm.provider} onChange={(e) => setRangeForm({ ...rangeForm, provider: e.target.value as Provider })}>
+								{PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
+							</select>
 						</div>
 						<div className="field">
 							<label>组名</label>

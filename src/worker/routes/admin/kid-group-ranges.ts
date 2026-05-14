@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { all, one, run } from "../../lib/db";
 import { audit } from "../../lib/audit";
 import { nowDateTime } from "../../lib/time";
+import type { Provider } from "../../lib/types";
 
 export const kidGroupRangeRoutes = new Hono<{ Bindings: Env }>();
 
@@ -9,6 +10,7 @@ interface RangeRow {
 	id: number;
 	kid_from: number;
 	kid_to: number;
+	provider: Provider;
 	group_name: string;
 	note: string | null;
 	priority: number;
@@ -16,13 +18,25 @@ interface RangeRow {
 	updated_at: string;
 }
 
+const PROVIDERS: Provider[] = ["claude", "gpt", "gemini"];
+function isProvider(v: unknown): v is Provider {
+	return typeof v === "string" && (PROVIDERS as string[]).includes(v);
+}
+
 kidGroupRangeRoutes.get("/", async (c) => {
-	const rows = await all<RangeRow>(c.env.DB, `SELECT * FROM kid_group_ranges ORDER BY priority DESC, id ASC`);
+	const provider = c.req.query("provider");
+	const sql = provider
+		? `SELECT * FROM kid_group_ranges WHERE provider = ? ORDER BY priority DESC, id ASC`
+		: `SELECT * FROM kid_group_ranges ORDER BY priority DESC, id ASC`;
+	const rows = provider
+		? await all<RangeRow>(c.env.DB, sql, provider)
+		: await all<RangeRow>(c.env.DB, sql);
 	return c.json({ items: rows });
 });
 
 kidGroupRangeRoutes.post("/", async (c) => {
-	const body = await c.req.json<{ kid_from: number; kid_to: number; group_name: string; note?: string; priority?: number }>();
+	const body = await c.req.json<{ kid_from: number; kid_to: number; provider: string; group_name: string; note?: string; priority?: number }>();
+	if (!isProvider(body.provider)) return c.json({ error: "invalid provider" }, 400);
 	if (!body.group_name?.trim()) return c.json({ error: "group_name required" }, 400);
 	if (!Number.isFinite(body.kid_from) || !Number.isFinite(body.kid_to)) return c.json({ error: "kid_from / kid_to required" }, 400);
 	if (body.kid_to < body.kid_from) return c.json({ error: "kid_to must be >= kid_from" }, 400);
@@ -30,10 +44,11 @@ kidGroupRangeRoutes.post("/", async (c) => {
 	const ts = nowDateTime();
 	const result = await run(
 		c.env.DB,
-		`INSERT INTO kid_group_ranges (kid_from, kid_to, group_name, note, priority, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO kid_group_ranges (kid_from, kid_to, provider, group_name, note, priority, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		body.kid_from,
 		body.kid_to,
+		body.provider,
 		body.group_name.trim(),
 		body.note?.trim() || null,
 		body.priority ?? 0,
@@ -47,7 +62,7 @@ kidGroupRangeRoutes.post("/", async (c) => {
 
 kidGroupRangeRoutes.put("/:id{[0-9]+}", async (c) => {
 	const id = Number(c.req.param("id"));
-	const body = await c.req.json<{ kid_from?: number; kid_to?: number; group_name?: string; note?: string; priority?: number }>();
+	const body = await c.req.json<{ kid_from?: number; kid_to?: number; provider?: string; group_name?: string; note?: string; priority?: number }>();
 
 	const existing = await one<RangeRow>(c.env.DB, `SELECT * FROM kid_group_ranges WHERE id = ?`, id);
 	if (!existing) return c.json({ error: "not found" }, 404);
@@ -56,11 +71,18 @@ kidGroupRangeRoutes.put("/:id{[0-9]+}", async (c) => {
 	const kid_to   = body.kid_to   ?? existing.kid_to;
 	if (kid_to < kid_from) return c.json({ error: "kid_to must be >= kid_from" }, 400);
 
+	let provider: Provider = existing.provider;
+	if (body.provider !== undefined) {
+		if (!isProvider(body.provider)) return c.json({ error: "invalid provider" }, 400);
+		provider = body.provider;
+	}
+
 	await run(
 		c.env.DB,
-		`UPDATE kid_group_ranges SET kid_from = ?, kid_to = ?, group_name = ?, note = ?, priority = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE kid_group_ranges SET kid_from = ?, kid_to = ?, provider = ?, group_name = ?, note = ?, priority = ?, updated_at = ? WHERE id = ?`,
 		kid_from,
 		kid_to,
+		provider,
 		(body.group_name ?? existing.group_name).trim(),
 		body.note !== undefined ? (body.note?.trim() || null) : existing.note,
 		body.priority ?? existing.priority,
