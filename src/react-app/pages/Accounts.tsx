@@ -8,6 +8,7 @@ interface Account {
 	name: string | null;
 	group_name: string | null;
 	tier: string;
+	quality_tier: number;
 	status: string;
 	status_reason: string | null;
 	last_test_response: string | null;
@@ -31,11 +32,13 @@ interface Account {
 export function Accounts({ provider }: { provider: string }) {
 	const [items, setItems] = useState<Account[]>([]);
 	const [total, setTotal] = useState(0);
-	const [filters, setFilters] = useState({ status: "", q: "" });
+	const [filters, setFilters] = useState({ status: "", q: "", quality_tier: "" });
 	const [loading, setLoading] = useState(false);
 	const [editing, setEditing] = useState<Account | null>(null);
 	const [testModal, setTestModal] = useState<{ account: Account; loading: boolean; result: TestResult | null; error: string | null } | null>(null);
 	const [inlineEdit, setInlineEdit] = useState<{ id: number; field: string; value: string } | null>(null);
+	const [selected, setSelected] = useState<Set<number>>(new Set());
+	const [bulkModal, setBulkModal] = useState<{ value: string } | null>(null);
 
 	const reload = useCallback(async () => {
 		setLoading(true);
@@ -44,9 +47,16 @@ export function Accounts({ provider }: { provider: string }) {
 			params.set("provider", provider);
 			if (filters.status) params.set("status", filters.status);
 			if (filters.q) params.set("q", filters.q);
+			if (filters.quality_tier) params.set("quality_tier", filters.quality_tier);
 			const r = await api.get<{ items: Account[]; total: number }>(`/api/admin/accounts?${params}`);
 			setItems(r.items);
 			setTotal(r.total);
+			// drop selections of rows that disappeared
+			setSelected((prev) => {
+				const next = new Set<number>();
+				for (const a of r.items) if (prev.has(a.id)) next.add(a.id);
+				return next;
+			});
 		} finally {
 			setLoading(false);
 		}
@@ -69,9 +79,31 @@ export function Accounts({ provider }: { provider: string }) {
 		const edit = override ?? inlineEdit;
 		if (!edit) return;
 		setInlineEdit(null);
-		const numFields = ["multiplier", "priority", "total_capacity"];
+		const numFields = ["multiplier", "priority", "total_capacity", "quality_tier"];
 		const coerced = numFields.includes(edit.field) ? Number(edit.value) : (edit.value || null);
 		await api.patch(`/api/admin/accounts/${edit.id}`, { [edit.field]: coerced });
+		reload();
+	}
+
+	function toggleSelect(id: number) {
+		setSelected((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) next.delete(id); else next.add(id);
+			return next;
+		});
+	}
+
+	function toggleSelectAll() {
+		setSelected((prev) => prev.size === items.length ? new Set() : new Set(items.map((a) => a.id)));
+	}
+
+	async function applyBulkQualityTier() {
+		if (!bulkModal) return;
+		const qt = Number(bulkModal.value);
+		if (!Number.isFinite(qt) || qt < 0) { alert("quality_tier 必须是 ≥ 0 的整数"); return; }
+		await api.post(`/api/admin/accounts/bulk-quality-tier`, { ids: Array.from(selected), quality_tier: Math.trunc(qt) });
+		setBulkModal(null);
+		setSelected(new Set());
 		reload();
 	}
 
@@ -115,12 +147,21 @@ export function Accounts({ provider }: { provider: string }) {
 					<option value="exhausted">exhausted</option>
 					<option value="terminated">terminated</option>
 				</select>
+				<select value={filters.quality_tier} onChange={(e) => setFilters({ ...filters, quality_tier: e.target.value })} title="质量 tier（用户 user_tier ≥ 此值才能用）">
+					<option value="">全部 tier</option>
+					{Array.from({ length: 11 }, (_, i) => <option key={i} value={String(i)}>tier {i}</option>)}
+				</select>
 				<input
 					placeholder="邮箱 / 备注 / user_id"
 					value={filters.q}
 					onChange={(e) => setFilters({ ...filters, q: e.target.value })}
 				/>
 				<button onClick={reload} disabled={loading}>刷新</button>
+				{selected.size > 0 && (
+					<button className="primary" onClick={() => setBulkModal({ value: "0" })}>
+						批量改 quality_tier ({selected.size})
+					</button>
+				)}
 			</div>
 
 
@@ -128,13 +169,28 @@ export function Accounts({ provider }: { provider: string }) {
 				<table>
 					<thead>
 						<tr>
-							<th>ID</th><th>邮箱 / 备注</th><th>组</th><th>tier</th><th>状态</th>
+							<th style={{ width: 28 }}>
+								<input
+									type="checkbox"
+									checked={items.length > 0 && selected.size === items.length}
+									onChange={toggleSelectAll}
+									title="全选/取消"
+								/>
+							</th>
+							<th>ID</th><th>邮箱 / 备注</th><th>组</th><th>tier</th><th>QT</th><th>状态</th>
 							<th>容量</th><th>绑定keys</th><th>×</th><th>优先级</th><th>到期</th><th>5h%</th><th>7d%</th><th>API地址</th><th>代理</th><th>添加时间</th><th>操作</th>
 						</tr>
 					</thead>
 					<tbody>
 						{items.map((a) => (
 							<tr key={a.id}>
+								<td>
+									<input
+										type="checkbox"
+										checked={selected.has(a.id)}
+										onChange={() => toggleSelect(a.id)}
+									/>
+								</td>
 								<td>{a.id}</td>
 								<td>
 									<div>{a.email}</div>
@@ -188,6 +244,25 @@ export function Accounts({ provider }: { provider: string }) {
 										</select>
 									) : (
 										<span className="inline-cell" onClick={() => startInline(a.id, "tier", a.tier)}>{a.tier}</span>
+									)}
+								</td>
+								<td title="quality_tier（用户 user_tier ≥ 此值才能用）">
+									{inlineEdit?.id === a.id && inlineEdit.field === "quality_tier" ? (
+										<input
+											autoFocus
+											type="number"
+											min="0"
+											max="10"
+											step="1"
+											className="inline-input"
+											style={{ width: 48 }}
+											value={inlineEdit.value}
+											onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+											onBlur={() => commitInline()}
+											onKeyDown={(e) => { if (e.key === "Enter") commitInline(); if (e.key === "Escape") setInlineEdit(null); }}
+										/>
+									) : (
+										<span className="inline-cell" onClick={() => startInline(a.id, "quality_tier", String(a.quality_tier ?? 0))}>{a.quality_tier ?? 0}</span>
 									)}
 								</td>
 								<td>
@@ -293,6 +368,33 @@ export function Accounts({ provider }: { provider: string }) {
 
 			{editing && <EditModal account={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
 			{testModal && <TestModal state={testModal} onClose={() => setTestModal(null)} />}
+			{bulkModal && (
+				<div className="modal-back" onClick={() => setBulkModal(null)}>
+					<div className="modal" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
+						<h3>批量改 quality_tier</h3>
+						<div className="field">
+							<label>新 quality_tier 值（0–10）</label>
+							<input
+								autoFocus
+								type="number"
+								min="0"
+								max="10"
+								step="1"
+								value={bulkModal.value}
+								onChange={(e) => setBulkModal({ value: e.target.value })}
+								onKeyDown={(e) => { if (e.key === "Enter") applyBulkQualityTier(); }}
+							/>
+						</div>
+						<div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+							将应用到选中的 {selected.size} 个账号
+						</div>
+						<div className="row" style={{ justifyContent: "flex-end" }}>
+							<button onClick={() => setBulkModal(null)}>取消</button>
+							<button className="primary" onClick={applyBulkQualityTier}>确认</button>
+						</div>
+					</div>
+				</div>
+			)}
 		</>
 	);
 }
@@ -381,6 +483,7 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 		name: account.name ?? "",
 		group_name: account.group_name ?? "",
 		tier: account.tier,
+		quality_tier: account.quality_tier ?? 0,
 		multiplier: account.multiplier,
 		priority: account.priority ?? 0,
 		total_capacity: account.total_capacity,
@@ -398,6 +501,7 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 			name: form.name || null,
 			group_name: form.group_name || null,
 			tier: form.tier,
+			quality_tier: Math.trunc(Number(form.quality_tier)),
 			multiplier: Number(form.multiplier),
 			priority: Number(form.priority),
 			total_capacity: Number(form.total_capacity),
@@ -413,10 +517,13 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 				<h3>编辑 #{account.id}</h3>
 				<div className="field"><label>备注</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
 				<div className="field"><label>组名</label><input value={form.group_name} onChange={(e) => setForm({ ...form, group_name: e.target.value })} /></div>
-				<div className="field"><label>tier</label>
+				<div className="field"><label>tier (套餐档)</label>
 					<select value={form.tier} onChange={(e) => setForm({ ...form, tier: e.target.value })}>
 						<option value="free">free</option><option value="pro">pro</option><option value="max">max</option>
 					</select>
+				</div>
+				<div className="field"><label>quality_tier (质量档，0-10；用户 user_tier 须 ≥ 此值才能用)</label>
+					<input type="number" min="0" max="10" step="1" value={form.quality_tier} onChange={(e) => setForm({ ...form, quality_tier: Number(e.target.value) })} />
 				</div>
 				<div className="field"><label>积分倍率</label><input type="number" step="0.1" value={form.multiplier} onChange={(e) => setForm({ ...form, multiplier: Number(e.target.value) })} /></div>
 				<div className="field"><label>优先级</label><input type="number" min="0" value={form.priority} onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })} /></div>

@@ -32,6 +32,7 @@ export interface AccountRow {
 	user_id: string | null;
 	multiplier: number;
 	tier: AccountTier;
+	quality_tier: number;
 	total_capacity: number;
 	used_count: number;
 	available_count: number;

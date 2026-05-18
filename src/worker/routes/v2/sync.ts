@@ -15,6 +15,15 @@ function parseIsMax(v: string | undefined): 0 | 1 | null {
 	return null;
 }
 
+// `user_tier` is optional; legacy callers omit it and we must preserve old
+// behavior (no quality_tier filtering). Returns `undefined` for missing/invalid.
+function parseUserTier(v: string | undefined): number | undefined {
+	if (v == null || v === "") return undefined;
+	const n = Number(v);
+	if (!Number.isFinite(n)) return undefined;
+	return Math.max(0, Math.trunc(n));
+}
+
 function makeHandler(provider: Provider) {
 	const app = new Hono<{ Bindings: Env }>();
 	app.get("/", async (c) => {
@@ -22,10 +31,11 @@ function makeHandler(provider: Provider) {
 		const forceReplace = c.req.query("force_replace") === "true";
 		const aid = c.req.query("aid");
 		const isMax = parseIsMax(c.req.query("is_max"));
+		const userTier = parseUserTier(c.req.query("user_tier"));
 		const details = c.req.query("details") || null;
 
 		if (!kidStr) {
-			const list = await listAvailableShared(c.env.DB, provider, isMax);
+			const list = await listAvailableShared(c.env.DB, provider, isMax, userTier);
 			return c.json(list);
 		}
 		const kid = Number(kidStr);
@@ -39,6 +49,7 @@ function makeHandler(provider: Provider) {
 			forceReplace,
 			problemAccountId: aidNum,
 			isMax,
+			userTier,
 			env: c.env,
 			ctx: c.executionCtx,
 		});

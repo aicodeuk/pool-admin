@@ -31,6 +31,13 @@ interface PickOpts {
 	forceReplace?: boolean;
 	problemAccountId?: number;
 	isMax?: 0 | 1 | null;
+	/**
+	 * Caller-supplied user tier (from `&user_tier=` query param).
+	 * `undefined` ⇒ legacy caller, do not apply quality_tier filtering.
+	 * Defined ⇒ only accounts with `quality_tier <= userTier` are eligible,
+	 * and within the eligible set we prefer the highest quality_tier.
+	 */
+	userTier?: number;
 	env: Env;
 	ctx: { waitUntil(p: Promise<unknown>): void };
 }
@@ -39,7 +46,7 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	| { ok: true; response: AccountResponse }
 	| { ok: false; status: number; error: string; details?: string }
 > {
-	const { provider, kid, forceReplace, problemAccountId, isMax, env, ctx } = opts;
+	const { provider, kid, forceReplace, problemAccountId, isMax, userTier, env, ctx } = opts;
 
 	if (problemAccountId && forceReplace) {
 		await scheduleProblemProbe(db, env, ctx, problemAccountId);
@@ -50,7 +57,7 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	const excludeId = forceReplace ? (problemAccountId ?? 0) : 0;
 
 	if (kid == null) {
-		const list = await listAvailableShared(db, provider, isMax ?? null);
+		const list = await listAvailableShared(db, provider, isMax ?? null, userTier);
 		return { ok: true, response: list[0] ?? emptyResponse() };
 	}
 
@@ -63,7 +70,7 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	);
 
 	if (binding?.group_name) {
-		const r = await tryGroupAssign(db, kid, provider, binding.group_name, forceReplace ?? false, isMax ?? null, excludeId, ctx);
+		const r = await tryGroupAssign(db, kid, provider, binding.group_name, forceReplace ?? false, isMax ?? null, excludeId, userTier, ctx);
 		if (r !== null) return r;
 		// non-channel group: fall through
 	}
@@ -80,7 +87,7 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 			provider,
 		);
 		if (rangeRow?.group_name) {
-			const r = await tryGroupAssign(db, kid, provider, rangeRow.group_name, forceReplace ?? false, isMax ?? null, excludeId, ctx);
+			const r = await tryGroupAssign(db, kid, provider, rangeRow.group_name, forceReplace ?? false, isMax ?? null, excludeId, userTier, ctx);
 			if (r !== null) return r;
 			// non-channel group: fall through
 		}
@@ -95,16 +102,21 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 	);
 	if (mapping && !forceReplace) {
 		const existing = await loadAccount(db, mapping.account_id);
-		if (existing && satisfiesIsMax(existing, isMax ?? null) && existing.status === "active") {
+		if (
+			existing
+			&& satisfiesIsMax(existing, isMax ?? null)
+			&& satisfiesUserTier(existing, userTier)
+			&& existing.status === "active"
+		) {
 			ctx.waitUntil(run(db, `UPDATE kid_mappings SET updated_at = ? WHERE kid = ? AND provider = ?`, nowDateTime(), kid, provider));
 			return { ok: true, response: formatResponse(existing, false) };
 		}
 	}
 
 	// 3. assign new from shared pool; pass known old account_id to skip SELECT inside upsertMapping
-	const candidate = await findSharedAvailable(db, provider, isMax ?? null, excludeId);
+	const candidate = await findSharedAvailable(db, provider, isMax ?? null, excludeId, userTier);
 	if (!candidate) {
-		const fallback = await findThirdPartyFallback(db, provider);
+		const fallback = await findThirdPartyFallback(db, provider, userTier);
 		if (!fallback) {
 			return { ok: false, status: 404, error: "No available accounts to assign" };
 		}
@@ -135,6 +147,24 @@ function satisfiesIsMax(a: AccountRow, isMax: 0 | 1 | null): boolean {
 	return true;
 }
 
+// Accounts with quality_tier > userTier are reserved for higher-tier users.
+// userTier === undefined ⇒ legacy caller, all accounts pass.
+function satisfiesUserTier(a: { quality_tier: number }, userTier: number | undefined): boolean {
+	if (userTier == null) return true;
+	return a.quality_tier <= userTier;
+}
+
+// Inline SQL fragments built from userTier — userTier is integer-coerced upstream
+// (parsed via Number() at the route entry), and we re-coerce with `| 0` defensively.
+function qualityTierClause(userTier: number | undefined, alias: string): string {
+	if (userTier == null) return "";
+	return `AND ${alias}.quality_tier <= ${userTier | 0}`;
+}
+function qualityTierOrder(userTier: number | undefined, alias: string): string {
+	if (userTier == null) return "";
+	return `${alias}.quality_tier DESC, `;
+}
+
 function buildProxyUrl(r: AccountWithProxy): string {
 	if (!r.px_id || !r.px_host || !r.px_port) return "";
 	return proxyConfigToUrl({
@@ -162,6 +192,7 @@ async function tryGroupAssign(
 	forceReplace: boolean,
 	isMax: 0 | 1 | null,
 	excludeId: number,
+	userTier: number | undefined,
 	ctx: { waitUntil(p: Promise<unknown>): void },
 ): Promise<{ ok: true; response: AccountResponse } | { ok: false; status: number; error: string; details?: string } | null> {
 	// Prefer the kid's current mapped account if still in the same group and active.
@@ -176,7 +207,8 @@ async function tryGroupAssign(
 			const existingAccount = await one<AccountWithProxy>(
 				db,
 				`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
-				 WHERE a.id = ? AND a.group_name = ? AND a.status = 'active' AND a.deleted_at IS NULL`,
+				 WHERE a.id = ? AND a.group_name = ? AND a.status = 'active' AND a.deleted_at IS NULL
+				   ${qualityTierClause(userTier, "a")}`,
 				existingMapping.account_id,
 				groupName,
 			);
@@ -187,7 +219,7 @@ async function tryGroupAssign(
 		}
 	}
 
-	const account = await findAccountByGroup(db, provider, groupName, isMax, excludeId);
+	const account = await findAccountByGroup(db, provider, groupName, isMax, excludeId, userTier);
 	if (account) {
 		await upsertMapping(db, kid, provider, account.id);
 		return { ok: true, response: formatResponse(account, true) };
@@ -204,6 +236,7 @@ async function findAccountByGroup(
 	groupName: string,
 	isMax: 0 | 1 | null,
 	excludeId: number,
+	userTier: number | undefined,
 ): Promise<AccountWithProxy | null> {
 	const tierClause = isMax === 1 ? `AND a.tier = 'max'` : "";
 	const excludeClause = excludeId > 0 ? `AND a.id != ${excludeId | 0}` : "";
@@ -211,8 +244,8 @@ async function findAccountByGroup(
 		db,
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
 		 WHERE a.provider = ? AND a.group_name = ? AND a.status = 'active' AND a.deleted_at IS NULL
-		   ${tierClause} ${excludeClause}
-		 ORDER BY a.account_level DESC, RANDOM() * (a.priority + 1) DESC LIMIT 1`,
+		   ${tierClause} ${excludeClause} ${qualityTierClause(userTier, "a")}
+		 ORDER BY ${qualityTierOrder(userTier, "a")}a.account_level DESC, RANDOM() * (a.priority + 1) DESC LIMIT 1`,
 		provider,
 		groupName,
 	);
@@ -223,6 +256,7 @@ async function findSharedAvailable(
 	provider: Provider,
 	isMax: 0 | 1 | null,
 	excludeId: number,
+	userTier: number | undefined,
 ): Promise<AccountWithProxy | null> {
 	const tierClause = isMax === 1 ? `AND a.tier = 'max'` : "";
 	const excludeClause = excludeId > 0 ? `AND a.id != ${excludeId | 0}` : "";
@@ -233,19 +267,20 @@ async function findSharedAvailable(
 		   AND (a.group_name IS NULL OR a.group_name = '')
 		   AND a.is_third_party = 0
 		   AND a.available_count > 0
-		   ${tierClause} ${excludeClause}
-		 ORDER BY RANDOM() * (a.priority + 1) DESC LIMIT 1`,
+		   ${tierClause} ${excludeClause} ${qualityTierClause(userTier, "a")}
+		 ORDER BY ${qualityTierOrder(userTier, "a")}RANDOM() * (a.priority + 1) DESC LIMIT 1`,
 		provider,
 	);
 }
 
-async function findThirdPartyFallback(db: DB, provider: Provider): Promise<AccountWithProxy | null> {
+async function findThirdPartyFallback(db: DB, provider: Provider, userTier: number | undefined): Promise<AccountWithProxy | null> {
 	return one<AccountWithProxy>(
 		db,
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
 		 WHERE a.provider = ? AND a.is_third_party = 1 AND a.status = 'active' AND a.deleted_at IS NULL
 		   AND (a.group_name IS NULL OR a.group_name = '')
-		 ORDER BY RANDOM() LIMIT 1`,
+		   ${qualityTierClause(userTier, "a")}
+		 ORDER BY ${qualityTierOrder(userTier, "a")}RANDOM() LIMIT 1`,
 		provider,
 	);
 }
@@ -406,6 +441,7 @@ export async function listAvailableShared(
 	db: DB,
 	provider: Provider,
 	isMax: 0 | 1 | null,
+	userTier?: number,
 ): Promise<AccountResponse[]> {
 	const tierClause = isMax === 1 ? `AND a.tier = 'max'` : "";
 	const rows = await all<AccountWithProxy>(
@@ -413,7 +449,8 @@ export async function listAvailableShared(
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
 		 WHERE a.provider = ? AND a.status = 'active' AND a.deleted_at IS NULL
 		   AND (a.group_name IS NULL OR a.group_name = '')
-		   ${tierClause}`,
+		   ${tierClause} ${qualityTierClause(userTier, "a")}
+		 ${userTier != null ? "ORDER BY a.quality_tier DESC" : ""}`,
 		provider,
 	);
 	const out: AccountResponse[] = [];

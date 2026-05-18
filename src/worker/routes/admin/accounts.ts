@@ -16,6 +16,7 @@ accountRoutes.get("/", async (c) => {
 	const status = c.req.query("status");
 	const groupName = c.req.query("group_name");
 	const isThirdParty = c.req.query("is_third_party");
+	const qualityTierStr = c.req.query("quality_tier");
 	const q = c.req.query("q");
 	const limit = Math.min(Number(c.req.query("limit")) || 100, 500);
 	const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
@@ -39,6 +40,13 @@ accountRoutes.get("/", async (c) => {
 	if (isThirdParty === "1" || isThirdParty === "0") {
 		where.push("a.is_third_party = ?");
 		args.push(Number(isThirdParty));
+	}
+	if (qualityTierStr != null && qualityTierStr !== "") {
+		const n = Number(qualityTierStr);
+		if (Number.isFinite(n)) {
+			where.push("a.quality_tier = ?");
+			args.push(Math.trunc(n));
+		}
 	}
 	if (q) {
 		where.push("(a.email LIKE ? OR a.name LIKE ? OR a.user_id LIKE ?)");
@@ -84,10 +92,10 @@ accountRoutes.post("/", async (c) => {
 		`INSERT INTO accounts (
 			provider, email, name,
 			access_token, access_token_expires_at, refresh_token, refresh_token_expires_at,
-			proxy_id, account_level, group_name, user_id, multiplier, tier,
+			proxy_id, account_level, group_name, user_id, multiplier, tier, quality_tier,
 			total_capacity, used_count, status, is_third_party, third_party_api_url, project,
 			purchase_date, expire_date
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
 		body.provider,
 		body.email ?? null,
 		body.name ?? null,
@@ -101,6 +109,7 @@ accountRoutes.post("/", async (c) => {
 		body.user_id ?? null,
 		body.multiplier ?? 4.0,
 		body.tier ?? "pro",
+		body.quality_tier ?? 0,
 		body.total_capacity ?? 100,
 		body.status ?? "active",
 		body.is_third_party ?? 0,
@@ -120,7 +129,7 @@ accountRoutes.patch("/:id{[0-9]+}", async (c) => {
 	const editable = [
 		"email", "name",
 		"access_token", "access_token_expires_at", "refresh_token", "refresh_token_expires_at",
-		"proxy_id", "account_level", "group_name", "user_id", "multiplier", "tier",
+		"proxy_id", "account_level", "group_name", "user_id", "multiplier", "tier", "quality_tier",
 		"total_capacity", "used_count", "status", "status_reason",
 		"is_third_party", "third_party_api_url", "project",
 		"purchase_date", "expire_date", "priority",
@@ -176,6 +185,29 @@ accountRoutes.post("/:id{[0-9]+}/reset-used", async (c) => {
 	await run(c.env.DB, `DELETE FROM kid_mappings WHERE account_id = ?`, id);
 	await audit(c.env.DB, "account.reset_used", { type: "account", id }, null);
 	return c.json({ ok: true });
+});
+
+// Bulk update quality_tier across many accounts. Used by admin UI for batch ops
+// ("select 20 accounts, mark all as quality_tier=5").
+// Body: { ids: number[], quality_tier: number }
+accountRoutes.post("/bulk-quality-tier", async (c) => {
+	const body = await c.req.json<{ ids?: unknown; quality_tier?: unknown }>();
+	const ids = Array.isArray(body.ids)
+		? body.ids.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0)
+		: [];
+	const qt = Number(body.quality_tier);
+	if (ids.length === 0) return c.json({ error: "ids required" }, 400);
+	if (!Number.isFinite(qt) || qt < 0) return c.json({ error: "quality_tier must be a non-negative number" }, 400);
+	const placeholders = ids.map(() => "?").join(",");
+	const r = await run(
+		c.env.DB,
+		`UPDATE accounts SET quality_tier = ?, updated_at = ? WHERE id IN (${placeholders})`,
+		Math.trunc(qt),
+		nowDateTime(),
+		...ids,
+	);
+	await audit(c.env.DB, "account.bulk_quality_tier", { type: "account", id: 0 }, { ids, quality_tier: Math.trunc(qt) });
+	return c.json({ ok: true, changes: r.meta?.changes ?? 0 });
 });
 
 type AccountWithProxy = AccountRow & {
