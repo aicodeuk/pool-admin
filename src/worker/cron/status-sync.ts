@@ -29,10 +29,11 @@ export async function syncStatus(env: Env, batch = 50): Promise<{ tried: number;
 	const rows = await all<{
 		id: number; provider: string; access_token: string | null; status: string;
 		is_third_party: number; third_party_api_url: string | null;
+		keep_active: number;
 		px_host: string | null; px_port: number | null; px_user: string | null; px_pass: string | null; px_scheme: string | null;
 	}>(
 		env.DB,
-		`SELECT a.id, a.provider, a.access_token, a.status, a.is_third_party, a.third_party_api_url,
+		`SELECT a.id, a.provider, a.access_token, a.status, a.is_third_party, a.third_party_api_url, a.keep_active,
 		        p.host AS px_host, p.port AS px_port, p.username AS px_user, p.password AS px_pass, p.scheme AS px_scheme
 		 FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id AND p.is_active = 1
 		 WHERE a.deleted_at IS NULL
@@ -100,11 +101,19 @@ export async function syncStatus(env: Env, batch = 50): Promise<{ tried: number;
 					if (msg) reason = msg.slice(0, 300);
 				} catch { /* ignore */ }
 				if (shouldPause(resp.status, reason)) {
-					await run(
-						env.DB,
-						`UPDATE accounts SET status = 'exhausted', status_reason = ?, status_changed_at = ?, last_test_response = ?, updated_at = ? WHERE id = ?`,
-						reason, ts, body.slice(0, 500), ts, r.id,
-					);
+					if (r.keep_active === 0) {
+						await run(
+							env.DB,
+							`UPDATE accounts SET status = 'exhausted', status_reason = ?, status_changed_at = ?, last_test_response = ?, updated_at = ? WHERE id = ?`,
+							reason, ts, body.slice(0, 500), ts, r.id,
+						);
+					} else {
+						await run(
+							env.DB,
+							`UPDATE accounts SET status_reason = ?, last_test_response = ?, updated_at = ? WHERE id = ?`,
+							reason, body.slice(0, 500), ts, r.id,
+						);
+					}
 				} else {
 					await run(
 						env.DB,

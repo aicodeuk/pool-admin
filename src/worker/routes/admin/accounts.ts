@@ -132,7 +132,7 @@ accountRoutes.patch("/:id{[0-9]+}", async (c) => {
 		"proxy_id", "account_level", "group_name", "user_id", "multiplier", "tier", "quality_tier",
 		"total_capacity", "used_count", "status", "status_reason",
 		"is_third_party", "third_party_api_url", "project",
-		"purchase_date", "expire_date", "priority",
+		"purchase_date", "expire_date", "priority", "keep_active",
 	] as const;
 
 	const sets: string[] = [];
@@ -318,11 +318,19 @@ accountRoutes.post("/:id{[0-9]+}/test", async (c) => {
 		}
 	}
 
-	await run(
-		c.env.DB,
-		`UPDATE accounts SET status = ?, status_reason = ?, status_changed_at = ?, last_test_response = ?, updated_at = ? WHERE id = ?`,
-		newStatus, statusReason, nowDateTime(), body.slice(0, 500), nowDateTime(), id,
-	);
+	if (resp.ok || row.keep_active === 0) {
+		await run(
+			c.env.DB,
+			`UPDATE accounts SET status = ?, status_reason = ?, status_changed_at = ?, last_test_response = ?, updated_at = ? WHERE id = ?`,
+			newStatus, statusReason, nowDateTime(), body.slice(0, 500), nowDateTime(), id,
+		);
+	} else {
+		await run(
+			c.env.DB,
+			`UPDATE accounts SET status_reason = ?, last_test_response = ?, updated_at = ? WHERE id = ?`,
+			statusReason, body.slice(0, 500), nowDateTime(), id,
+		);
+	}
 	await audit(c.env.DB, "account.test", { type: "account", id }, { status: newStatus, http_status: resp.status });
 	return c.json({ ok: resp.ok, status: newStatus, status_reason: statusReason, http_status: resp.status, request_url: requestUrl, proxy: proxyDisplay, request_payload: requestPayload, response_body: body });
 });
