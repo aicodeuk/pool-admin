@@ -15,8 +15,14 @@ function shouldPause(httpStatus: number, message: string): boolean {
 
 const PROBE_PAYLOAD = JSON.stringify({
 	model: "claude-haiku-4-5-20251001",
-	max_tokens: 1,
-	messages: [{ role: "user", content: "hi" }],
+	max_tokens: 128,
+	messages: [{
+		role: "user",
+		content: "Please respond with 'active' if you can process this request. Test timestamp: " + new Date().toISOString(),
+	}],
+	metadata: {
+		user_id: "{\"device_id\":\"407303eb15f310c4cced52aee82eea6a21072c9b25dc68f625a8d771a6a0c896\",\"account_uuid\":\"\",\"session_id\":\"ae05ca5a-fba8-4830-9f44-dde696b2a3ad\"}",
+	},
 });
 
 export async function syncStatus(env: Env, batch = 50): Promise<{ tried: number; recovered: number }> {

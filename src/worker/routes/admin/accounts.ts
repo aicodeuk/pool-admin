@@ -256,7 +256,17 @@ accountRoutes.post("/:id{[0-9]+}/test", async (c) => {
 		const apiBase = (row.third_party_api_url ?? "https://api.anthropic.com").replace(/\/$/, "");
 		const isApiKey = row.is_third_party === 1 && (row.access_token.startsWith("sk-") || row.access_token.startsWith("sk_"));
 		requestUrl = `${apiBase}/v1/messages`;
-		requestPayload = { model: "claude-haiku-4-5-20251001", max_tokens: 1, messages: [{ role: "user", content: "hi" }] };
+		requestPayload = {
+			model: "claude-haiku-4-5-20251001",
+			max_tokens: 128,
+			messages: [{
+				role: "user",
+				content: "Please respond with 'active' if you can process this request. Test timestamp: " + new Date().toISOString(),
+			}],
+			metadata: {
+				user_id: "{\"device_id\":\"407303eb15f310c4cced52aee82eea6a21072c9b25dc68f625a8d771a6a0c896\",\"account_uuid\":\"\",\"session_id\":\"ae05ca5a-fba8-4830-9f44-dde696b2a3ad\"}",
+			},
+		};
 		reqHeaders = { "content-type": "application/json", "anthropic-version": "2023-06-01" };
 		if (isApiKey) reqHeaders["x-api-key"] = row.access_token;
 		else reqHeaders["authorization"] = `Bearer ${row.access_token}`;
