@@ -346,11 +346,12 @@ async function probeAndMark(db: DB, env: Env, accountId: number): Promise<void> 
 		provider: string;
 		access_token: string | null;
 		third_party_api_url: string | null;
+		keep_active: number;
 		px_host: string | null; px_port: number | null;
 		px_user: string | null; px_pass: string | null; px_scheme: string | null;
 	}>(
 		db,
-		`SELECT a.provider, a.access_token, a.third_party_api_url,
+		`SELECT a.provider, a.access_token, a.third_party_api_url, a.keep_active,
 		        p.host AS px_host, p.port AS px_port,
 		        p.username AS px_user, p.password AS px_pass, p.scheme AS px_scheme
 		 FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id AND p.is_active = 1
@@ -413,19 +414,35 @@ async function probeAndMark(db: DB, env: Env, accountId: number): Promise<void> 
 				if (msg) reason = msg.slice(0, 300);
 			} catch { /* ignore */ }
 			const ts = nowDateTime();
-			await run(
-				db,
-				`UPDATE accounts SET status = 'problem', status_reason = ?, status_changed_at = ?, updated_at = ? WHERE id = ?`,
-				`${reason} (probe confirmed client report)`, ts, ts, accountId,
-			);
+			if (row.keep_active === 0) {
+				await run(
+					db,
+					`UPDATE accounts SET status = 'problem', status_reason = ?, status_changed_at = ?, updated_at = ? WHERE id = ?`,
+					`${reason} (probe confirmed client report)`, ts, ts, accountId,
+				);
+			} else {
+				await run(
+					db,
+					`UPDATE accounts SET status_reason = ?, updated_at = ? WHERE id = ?`,
+					`${reason} (probe confirmed client report)`, ts, accountId,
+				);
+			}
 		}
 	} catch (e) {
 		const ts = nowDateTime();
-		await run(
-			db,
-			`UPDATE accounts SET status = 'problem', status_reason = ?, status_changed_at = ?, updated_at = ? WHERE id = ?`,
-			`probe error: ${(e as Error).message}`, ts, ts, accountId,
-		);
+		if (row.keep_active === 0) {
+			await run(
+				db,
+				`UPDATE accounts SET status = 'problem', status_reason = ?, status_changed_at = ?, updated_at = ? WHERE id = ?`,
+				`probe error: ${(e as Error).message}`, ts, ts, accountId,
+			);
+		} else {
+			await run(
+				db,
+				`UPDATE accounts SET status_reason = ?, updated_at = ? WHERE id = ?`,
+				`probe error: ${(e as Error).message}`, ts, accountId,
+			);
+		}
 	}
 }
 
