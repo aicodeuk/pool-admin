@@ -27,6 +27,7 @@ interface Account {
 	kid_count: number;
 	created_at: string;
 	third_party_api_url: string | null;
+	keep_active: number;
 }
 
 export function Accounts({ provider }: { provider: string }) {
@@ -178,7 +179,7 @@ export function Accounts({ provider }: { provider: string }) {
 								/>
 							</th>
 							<th>ID</th><th>邮箱 / 备注</th><th>组</th><th>tier</th><th>QT</th><th>状态</th>
-							<th>容量</th><th>绑定keys</th><th>×</th><th>优先级</th><th>到期</th><th>5h%</th><th>7d%</th><th>API地址</th><th>代理</th><th>添加时间</th><th>操作</th>
+							<th>容量</th><th>绑定keys</th><th>×</th><th>优先级</th><th>到期</th><th>5h%</th><th>7d%</th><th>API地址</th><th>代理</th><th>添加时间</th><th>不下线</th><th>操作</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -347,6 +348,14 @@ export function Accounts({ provider }: { provider: string }) {
 									) : <span className="muted">-</span>}
 								</td>
 								<td className="mono">{a.created_at.slice(0, 10)}</td>
+								<td>
+									<input
+										type="checkbox"
+										checked={a.keep_active === 1}
+										onChange={() => patch(a.id, { keep_active: a.keep_active === 1 ? 0 : 1 })}
+										title="勾选后，即使账号有问题也不会被下线，保持 active 状态"
+									/>
+								</td>
 								<td>
 									<div className="row" style={{ gap: 4 }}>
 										<button className="ghost" onClick={() => setEditing(a)}>编辑</button>
