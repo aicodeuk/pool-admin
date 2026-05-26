@@ -80,7 +80,7 @@ export function Accounts({ provider }: { provider: string }) {
 		const edit = override ?? inlineEdit;
 		if (!edit) return;
 		setInlineEdit(null);
-		const numFields = ["multiplier", "priority", "total_capacity", "quality_tier"];
+		const numFields = ["multiplier", "priority", "quality_tier"];
 		const coerced = numFields.includes(edit.field) ? Number(edit.value) : (edit.value || null);
 		await api.patch(`/api/admin/accounts/${edit.id}`, { [edit.field]: coerced });
 		reload();
@@ -111,17 +111,6 @@ export function Accounts({ provider }: { provider: string }) {
 	async function remove(id: number) {
 		if (!confirm(`删除账号 #${id}？`)) return;
 		await api.delete(`/api/admin/accounts/${id}`);
-		reload();
-	}
-
-	async function clearProblem(id: number) {
-		await api.post(`/api/admin/accounts/${id}/clear-problem`);
-		reload();
-	}
-
-	async function resetUsed(id: number) {
-		if (!confirm(`重置 #${id} 的使用计数 + 删除 mapping？`)) return;
-		await api.post(`/api/admin/accounts/${id}/reset-used`);
 		reload();
 	}
 
@@ -179,7 +168,7 @@ export function Accounts({ provider }: { provider: string }) {
 								/>
 							</th>
 							<th>ID</th><th>邮箱 / 备注</th><th>组</th><th>tier</th><th>QT</th><th>状态</th>
-							<th>容量</th><th>绑定keys</th><th>×</th><th>优先级</th><th>到期</th><th>5h%</th><th>7d%</th><th>API地址</th><th>代理</th><th>添加时间</th><th>不下线</th><th>操作</th>
+							<th>绑定keys</th><th>×</th><th>优先级</th><th>代理</th><th>添加时间</th><th>不下线</th><th>操作</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -278,24 +267,6 @@ export function Accounts({ provider }: { provider: string }) {
 										</div>
 									)}
 								</td>
-								<td>
-									{a.used_count}/
-									{inlineEdit?.id === a.id && inlineEdit.field === "total_capacity" ? (
-										<input
-											autoFocus
-											type="number"
-											min="0"
-											className="inline-input"
-											style={{ width: 56 }}
-											value={inlineEdit.value}
-											onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-											onBlur={() => commitInline()}
-											onKeyDown={(e) => { if (e.key === "Enter") commitInline(); if (e.key === "Escape") setInlineEdit(null); }}
-										/>
-									) : (
-										<span className="inline-cell" onClick={() => startInline(a.id, "total_capacity", String(a.total_capacity))}>{a.total_capacity}</span>
-									)}
-								</td>
 								<td>{a.kid_count}</td>
 								<td>
 									{inlineEdit?.id === a.id && inlineEdit.field === "multiplier" ? (
@@ -331,22 +302,7 @@ export function Accounts({ provider }: { provider: string }) {
 										<span className="inline-cell" onClick={() => startInline(a.id, "priority", String(a.priority ?? 0))}>{a.priority ?? 0}</span>
 									)}
 								</td>
-								<td className="mono">{a.expire_date ?? "-"}</td>
-								<td>{a.usage_5h_pct?.toFixed(0) ?? "-"}</td>
-								<td>{a.usage_7d_pct?.toFixed(0) ?? "-"}</td>
-								<td className="mono truncate">{a.proxy_label ?? "-"}</td>
-								<td>
-									{a.third_party_api_url ? (
-										<span
-											className="mono truncate"
-											style={{ cursor: "pointer", maxWidth: 160, display: "inline-block", fontSize: 11 }}
-											title={a.third_party_api_url}
-											onClick={() => navigator.clipboard.writeText(a.third_party_api_url!)}
-										>
-											{a.third_party_api_url}
-										</span>
-									) : <span className="muted">-</span>}
-								</td>
+								<td className="mono">{a.proxy_label ?? "-"}</td>
 								<td className="mono">{a.created_at.slice(0, 10)}</td>
 								<td>
 									<input
@@ -360,13 +316,8 @@ export function Accounts({ provider }: { provider: string }) {
 									<div className="row" style={{ gap: 4 }}>
 										<button className="ghost" onClick={() => setEditing(a)}>编辑</button>
 										<button className="ghost" onClick={() => testAccount(a)} title="发送探活请求，成功→active，失败→problem">探活</button>
-										{a.status === "problem" && <button className="ghost" onClick={() => clearProblem(a.id)}>恢复</button>}
 										<button className="ghost" onClick={() => patch(a.id, { status: a.status === "paused" ? "active" : "paused" })}>{a.status === "paused" ? "启用" : "停用"}</button>
-										<button className="ghost" onClick={() => resetUsed(a.id)}>重置</button>
-										{a.status !== "terminated" && (
-											<button className="ghost danger" onClick={async () => { if (confirm(`终止账号 #${a.id}？将从列表隐藏，可通过状态搜索找回。`)) await patch(a.id, { status: "terminated" }); }}>终止</button>
-										)}
-										<button className="ghost danger" onClick={() => remove(a.id)}>删</button>
+										<button className="ghost danger" onClick={() => remove(a.id)}>删除</button>
 									</div>
 								</td>
 							</tr>
