@@ -168,7 +168,7 @@ export function Accounts({ provider }: { provider: string }) {
 								/>
 							</th>
 							<th>ID</th><th>邮箱 / 备注</th><th>组</th><th>tier</th><th>QT</th><th>状态</th>
-							<th>绑定keys</th><th>×</th><th>优先级</th><th>代理</th><th>添加时间</th><th>不下线</th><th>操作</th>
+							<th>绑定keys</th><th>×</th><th>优先级</th><th>API地址</th><th>添加时间</th><th>不下线</th><th>操作</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -302,7 +302,18 @@ export function Accounts({ provider }: { provider: string }) {
 										<span className="inline-cell" onClick={() => startInline(a.id, "priority", String(a.priority ?? 0))}>{a.priority ?? 0}</span>
 									)}
 								</td>
-								<td className="mono">{a.proxy_label ?? "-"}</td>
+								<td>
+									{a.third_party_api_url ? (
+										<span
+											className="mono truncate"
+											style={{ cursor: "pointer", maxWidth: 160, display: "inline-block", fontSize: 11 }}
+											title={a.third_party_api_url}
+											onClick={() => navigator.clipboard.writeText(a.third_party_api_url!)}
+										>
+											{a.third_party_api_url}
+										</span>
+									) : <span className="muted">-</span>}
+								</td>
 								<td className="mono">{a.created_at.slice(0, 10)}</td>
 								<td>
 									<input
