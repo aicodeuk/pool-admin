@@ -19,6 +19,7 @@ import { refreshExpiringTokens } from "./cron/token-refresh";
 import { syncUsage } from "./cron/usage-sync";
 import { syncStatus } from "./cron/status-sync";
 import { cleanupStaleMappings } from "./cron/mapping-cleanup";
+import { cleanupSyncLogs } from "./cron/sync-logs-cleanup";
 import { runJob } from "./cron/log";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -64,6 +65,7 @@ export default {
 					} else if (cron === "*/30 * * * *") {
 						await runJob(env, "usage_sync", () => syncUsage(env));
 						await runJob(env, "mapping_cleanup", () => cleanupStaleMappings(env));
+						await runJob(env, "sync_logs_cleanup", () => cleanupSyncLogs(env));
 					}
 				} catch (e) {
 					console.error(`cron ${cron} failed:`, e);

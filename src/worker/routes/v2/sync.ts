@@ -56,14 +56,20 @@ function makeHandler(provider: Provider) {
 
 		const httpStatus = r.ok ? 200 : r.status;
 		const assignedId = r.ok && r.response.id ? r.response.id : null;
-		c.executionCtx.waitUntil(
-			run(
-				c.env.DB,
-				`INSERT INTO sync_logs (provider, kid, force_replace, is_max, aid, assigned_account_id, http_status, details)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-				provider, kid, forceReplace ? 1 : 0, isMax ?? null, aidNum ?? null, assignedId, httpStatus, details,
-			),
-		);
+		// Write a sync_log only for events worth keeping: errors, force_replace,
+		// and fresh assignments. Plain warm cache hits (existing mapping reused)
+		// are the high-volume path and are skipped to relieve D1 write pressure.
+		const reusedHit = r.ok && r.reused === true;
+		if (!reusedHit || forceReplace) {
+			c.executionCtx.waitUntil(
+				run(
+					c.env.DB,
+					`INSERT INTO sync_logs (provider, kid, force_replace, is_max, aid, assigned_account_id, http_status, details)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+					provider, kid, forceReplace ? 1 : 0, isMax ?? null, aidNum ?? null, assignedId, httpStatus, details,
+				),
+			);
+		}
 
 		if (!r.ok) return c.json({ error: r.error, details: r.details }, r.status as 400 | 404 | 500);
 		return c.json(r.response);

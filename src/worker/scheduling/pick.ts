@@ -43,7 +43,7 @@ interface PickOpts {
 }
 
 export async function pickAccount(db: DB, opts: PickOpts): Promise<
-	| { ok: true; response: AccountResponse }
+	| { ok: true; response: AccountResponse; reused?: boolean }
 	| { ok: false; status: number; error: string; details?: string }
 > {
 	const { provider, kid, forceReplace, problemAccountId, isMax, userTier, env, ctx } = opts;
@@ -109,7 +109,7 @@ export async function pickAccount(db: DB, opts: PickOpts): Promise<
 			&& existing.status === "active"
 		) {
 			ctx.waitUntil(run(db, `UPDATE kid_mappings SET updated_at = ? WHERE kid = ? AND provider = ?`, nowDateTime(), kid, provider));
-			return { ok: true, response: formatResponse(existing, false) };
+			return { ok: true, response: formatResponse(existing, false), reused: true };
 		}
 	}
 
@@ -194,7 +194,7 @@ async function tryGroupAssign(
 	excludeId: number,
 	userTier: number | undefined,
 	ctx: { waitUntil(p: Promise<unknown>): void },
-): Promise<{ ok: true; response: AccountResponse } | { ok: false; status: number; error: string; details?: string } | null> {
+): Promise<{ ok: true; response: AccountResponse; reused?: boolean } | { ok: false; status: number; error: string; details?: string } | null> {
 	// Prefer the kid's current mapped account if still in the same group and active.
 	if (!forceReplace) {
 		const existingMapping = await one<{ account_id: number }>(
@@ -214,7 +214,7 @@ async function tryGroupAssign(
 			);
 			if (existingAccount && satisfiesIsMax(existingAccount, isMax)) {
 				ctx.waitUntil(run(db, `UPDATE kid_mappings SET updated_at = ? WHERE kid = ? AND provider = ?`, nowDateTime(), kid, provider));
-				return { ok: true, response: formatResponse(existingAccount, true) };
+				return { ok: true, response: formatResponse(existingAccount, true), reused: true };
 			}
 		}
 	}
