@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { getModelPricing, calcCost, fmtTokens } from "../lib/pricing";
+import { MODEL_COLORS, statusColor, buildSlices, PieChart } from "../components/PieChart";
 
 interface Stats {
 	totals: { provider: string; status: string; n: number }[];
@@ -36,100 +38,6 @@ function isIndexStats(s: IndexStats | { error: string } | undefined): s is Index
 	return !!s && "total" in s;
 }
 
-// $/MTok pricing — strip date suffix (e.g. -20251001) before matching
-interface Pricing { input: number; cacheWrite: number; cacheHit: number; output: number }
-
-function getModelPricing(raw: string): Pricing | null {
-	const m = raw.toLowerCase().replace(/-\d{8}$/, "");
-	if (m.includes("opus")) {
-		if (m.match(/opus-4-[567]/)) return { input: 5, cacheWrite: 6.25, cacheHit: 0.50, output: 25 };
-		if (m.includes("opus-4-1") || m === "claude-opus-4") return { input: 15, cacheWrite: 18.75, cacheHit: 1.50, output: 75 };
-		if (m.includes("opus-3")) return { input: 15, cacheWrite: 18.75, cacheHit: 1.50, output: 75 };
-	}
-	if (m.includes("sonnet")) return { input: 3, cacheWrite: 3.75, cacheHit: 0.30, output: 15 };
-	if (m.includes("haiku")) {
-		if (m.includes("haiku-4-5")) return { input: 1, cacheWrite: 1.25, cacheHit: 0.10, output: 5 };
-		if (m.includes("haiku-3-5")) return { input: 0.80, cacheWrite: 1, cacheHit: 0.08, output: 4 };
-		if (m.includes("haiku-3")) return { input: 0.25, cacheWrite: 0.30, cacheHit: 0.03, output: 1.25 };
-	}
-	return null;
-}
-
-function calcCost(b: ModelBucket, p: Pricing): number {
-	const M = 1_000_000;
-	return (
-		(b.input_tokens.value / M) * p.input +
-		(b.cache_creation_tokens.value / M) * p.cacheWrite +
-		(b.cache_read_tokens.value / M) * p.cacheHit +
-		(b.output_tokens.value / M) * p.output
-	);
-}
-
-function fmtTokens(n: number): string {
-	if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
-	if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
-	return String(n);
-}
-
-// Distinct color palette for model pie chart
-const MODEL_COLORS = [
-	"#6366f1", "#f59e0b", "#10b981", "#3b82f6", "#ec4899",
-	"#14b8a6", "#f97316", "#8b5cf6", "#06b6d4", "#84cc16",
-	"#ef4444", "#a78bfa", "#fb923c", "#34d399", "#60a5fa",
-];
-
-function statusColor(code: number): string {
-	if (code === 200) return "#16a34a";
-	if (code >= 200 && code < 300) return "#4ade80";
-	if (code >= 400 && code < 500) return "#f59e0b";
-	if (code >= 500) return "#dc2626";
-	return "#6b7280";
-}
-
-interface Slice { key: string | number; count: number; frac: number; color: string; path: string }
-
-function buildSlices(
-	buckets: { key: string | number; doc_count: number }[],
-	total: number,
-	colorFn: (key: string | number, i: number) => string,
-): Slice[] {
-	const cx = 90, cy = 90, r = 76;
-	let angle = -Math.PI / 2;
-	return buckets.map((b, i) => {
-		const frac = b.doc_count / total;
-		const start = angle;
-		const end = angle + frac * 2 * Math.PI;
-		angle = end;
-		const x1 = cx + r * Math.cos(start), y1 = cy + r * Math.sin(start);
-		const x2 = cx + r * Math.cos(end), y2 = cy + r * Math.sin(end);
-		return { key: b.key, count: b.doc_count, frac, color: colorFn(b.key, i), path: `M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${frac > 0.5 ? 1 : 0} 1 ${x2},${y2} Z` };
-	});
-}
-
-function PieChart({ slices }: { slices: Slice[] }) {
-	return (
-		<div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
-			<svg viewBox="0 0 180 180" width={160} height={160} style={{ flexShrink: 0 }}>
-				{slices.map((s, i) => (
-					<path key={i} d={s.path} fill={s.color}>
-						<title>{s.key}: {s.count.toLocaleString()} ({(s.frac * 100).toFixed(1)}%)</title>
-					</path>
-				))}
-			</svg>
-			<div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-				{slices.map((s, i) => (
-					<div key={i} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12 }}>
-						<span style={{ width: 10, height: 10, borderRadius: 2, background: s.color, flexShrink: 0 }} />
-						<span className="mono" style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.key}</span>
-						<span style={{ color: "#6b7280", flexShrink: 0 }}>{s.count.toLocaleString()}</span>
-						<span style={{ color: "#9ca3af", fontSize: 11, flexShrink: 0 }}>({(s.frac * 100).toFixed(1)}%)</span>
-					</div>
-				))}
-			</div>
-		</div>
-	);
-}
-
 function EsProviderSection({ label, stats }: { label: string; stats: IndexStats }) {
 	const today = new Date().toISOString().slice(0, 10);
 	const successCount = stats.status_buckets.find((b) => b.key === 200)?.doc_count ?? 0;
@@ -141,7 +49,12 @@ function EsProviderSection({ label, stats }: { label: string; stats: IndexStats 
 
 	const costRows = stats.model_buckets.map((b, i) => {
 		const pricing = getModelPricing(b.key);
-		const cost = pricing ? calcCost(b, pricing) : null;
+		const cost = pricing ? calcCost({
+			input_tokens: b.input_tokens.value,
+			output_tokens: b.output_tokens.value,
+			cache_creation_tokens: b.cache_creation_tokens.value,
+			cache_read_tokens: b.cache_read_tokens.value,
+		}, pricing) : null;
 		return { bucket: b, pricing, cost, color: MODEL_COLORS[i % MODEL_COLORS.length] };
 	});
 	const totalCost = costRows.reduce((a, r) => a + (r.cost ?? 0), 0);

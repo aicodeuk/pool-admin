@@ -84,14 +84,21 @@ esStatsRoutes.get("/", async (c) => {
 	return c.json({ claude, gpt });
 });
 
+interface ModelAgg {
+	model: string;
+	count: number;
+	input_tokens: number;
+	output_tokens: number;
+	cache_creation_tokens: number;
+	cache_read_tokens: number;
+}
+
 interface AccountAgg {
 	account_id: number;
 	name: string | null;
 	third_party_api_url: string | null;
 	total: number;
-	success: number;
-	error: number;
-	error_rate: number;
+	models: ModelAgg[];
 }
 
 esStatsRoutes.get("/accounts", async (c) => {
@@ -115,11 +122,20 @@ esStatsRoutes.get("/accounts", async (c) => {
 			},
 			body: JSON.stringify({
 				size: 0,
+				query: { term: { status_code: 200 } },
 				aggs: {
 					by_account: {
 						terms: { field: "account_id", size: 1000 },
 						aggs: {
-							success: { filter: { term: { status_code: 200 } } },
+							by_model: {
+								terms: { field: "model.keyword", size: 50 },
+								aggs: {
+									input_tokens: { sum: { field: "input_tokens" } },
+									output_tokens: { sum: { field: "output_tokens" } },
+									cache_creation_tokens: { sum: { field: "cache_creation_input_tokens" } },
+									cache_read_tokens: { sum: { field: "cache_read_input_tokens" } },
+								},
+							},
 						},
 					},
 				},
@@ -135,7 +151,20 @@ esStatsRoutes.get("/accounts", async (c) => {
 	const data = await res.json<{
 		aggregations: {
 			by_account: {
-				buckets: { key: number; doc_count: number; success: { doc_count: number } }[];
+				buckets: {
+					key: number;
+					doc_count: number;
+					by_model: {
+						buckets: {
+							key: string;
+							doc_count: number;
+							input_tokens: { value: number };
+							output_tokens: { value: number };
+							cache_creation_tokens: { value: number };
+							cache_read_tokens: { value: number };
+						}[];
+					};
+				}[];
 			};
 		};
 	}>();
@@ -154,23 +183,25 @@ esStatsRoutes.get("/accounts", async (c) => {
 	}
 
 	const accounts: AccountAgg[] = buckets.map((b) => {
-		const total = b.doc_count;
-		const success = b.success?.doc_count ?? 0;
-		const error = total - success;
 		const meta = info.get(b.key);
+		const models: ModelAgg[] = (b.by_model?.buckets ?? []).map((m) => ({
+			model: m.key,
+			count: m.doc_count,
+			input_tokens: m.input_tokens.value,
+			output_tokens: m.output_tokens.value,
+			cache_creation_tokens: m.cache_creation_tokens.value,
+			cache_read_tokens: m.cache_read_tokens.value,
+		}));
 		return {
 			account_id: b.key,
 			name: meta?.name ?? null,
 			third_party_api_url: meta?.third_party_api_url ?? null,
-			total,
-			success,
-			error,
-			error_rate: total > 0 ? error / total : 0,
+			total: b.doc_count,
+			models,
 		};
 	});
 	accounts.sort((a, b) => b.total - a.total);
 
 	const total = accounts.reduce((s, a) => s + a.total, 0);
-	const success = accounts.reduce((s, a) => s + a.success, 0);
-	return c.json({ accounts, total, success, error: total - success });
+	return c.json({ accounts, total });
 });
