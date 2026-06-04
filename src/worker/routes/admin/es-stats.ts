@@ -1,13 +1,29 @@
 import { Hono } from "hono";
+import { all } from "../../lib/db";
 
 export const esStatsRoutes = new Hono<{ Bindings: Env }>();
 
-esStatsRoutes.get("/", async (c) => {
-	const { ES_URL, ES_USERNAME, ES_PASSWORD } = c.env;
-	if (!ES_URL) return c.json({ status_buckets: [], model_buckets: [], total: 0, unconfigured: true });
+function indexFor(provider: string, today: string): string | null {
+	if (provider === "claude") return `claude-${today}`;
+	if (provider === "gpt") return `request-${today}`;
+	return null;
+}
 
-	const today = new Date().toISOString().slice(0, 10);
-	const index = `request-${today}`;
+interface IndexStats {
+	status_buckets: { key: number; doc_count: number }[];
+	model_buckets: {
+		key: string;
+		doc_count: number;
+		input_tokens: { value: number };
+		output_tokens: { value: number };
+		cache_creation_tokens: { value: number };
+		cache_read_tokens: { value: number };
+	}[];
+	total: number;
+}
+
+async function queryIndex(env: Env, index: string): Promise<IndexStats | { error: string }> {
+	const { ES_URL, ES_USERNAME, ES_PASSWORD } = env;
 	const auth = btoa(`${ES_USERNAME}:${ES_PASSWORD}`);
 
 	let res: Response;
@@ -35,24 +51,17 @@ esStatsRoutes.get("/", async (c) => {
 			}),
 		});
 	} catch (e) {
-		return c.json({ error: String(e) }, 502);
+		return { error: String(e) };
 	}
 
-	if (res.status === 404) return c.json({ status_buckets: [], model_buckets: [], total: 0 });
-	if (!res.ok) return c.json({ error: await res.text() }, 502);
+	if (res.status === 404) return { status_buckets: [], model_buckets: [], total: 0 };
+	if (!res.ok) return { error: await res.text() };
 
 	const data = await res.json<{
 		aggregations: {
 			by_status: { buckets: { key: number; doc_count: number }[] };
 			by_model: {
-				buckets: {
-					key: string;
-					doc_count: number;
-					input_tokens: { value: number };
-					output_tokens: { value: number };
-					cache_creation_tokens: { value: number };
-					cache_read_tokens: { value: number };
-				}[];
+				buckets: IndexStats["model_buckets"];
 			};
 		};
 	}>();
@@ -60,5 +69,105 @@ esStatsRoutes.get("/", async (c) => {
 	const model_buckets = data.aggregations?.by_model?.buckets ?? [];
 	const total = status_buckets.reduce((a, b) => a + b.doc_count, 0);
 
-	return c.json({ status_buckets, model_buckets, total });
+	return { status_buckets, model_buckets, total };
+}
+
+esStatsRoutes.get("/", async (c) => {
+	if (!c.env.ES_URL) return c.json({ unconfigured: true });
+
+	const today = new Date().toISOString().slice(0, 10);
+	const [claude, gpt] = await Promise.all([
+		queryIndex(c.env, `claude-${today}`),
+		queryIndex(c.env, `request-${today}`),
+	]);
+
+	return c.json({ claude, gpt });
+});
+
+interface AccountAgg {
+	account_id: number;
+	email: string | null;
+	total: number;
+	success: number;
+	error: number;
+	error_rate: number;
+}
+
+esStatsRoutes.get("/accounts", async (c) => {
+	if (!c.env.ES_URL) return c.json({ accounts: [], unconfigured: true });
+
+	const provider = c.req.query("provider") ?? "claude";
+	const today = new Date().toISOString().slice(0, 10);
+	const index = indexFor(provider, today);
+	if (!index) return c.json({ error: "invalid provider" }, 400);
+
+	const { ES_URL, ES_USERNAME, ES_PASSWORD } = c.env;
+	const auth = btoa(`${ES_USERNAME}:${ES_PASSWORD}`);
+
+	let res: Response;
+	try {
+		res = await fetch(`${ES_URL}/${index}/_search`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Basic ${auth}`,
+			},
+			body: JSON.stringify({
+				size: 0,
+				aggs: {
+					by_account: {
+						terms: { field: "account_id", size: 1000 },
+						aggs: {
+							success: { filter: { term: { status_code: 200 } } },
+						},
+					},
+				},
+			}),
+		});
+	} catch (e) {
+		return c.json({ error: String(e) }, 502);
+	}
+
+	if (res.status === 404) return c.json({ accounts: [] });
+	if (!res.ok) return c.json({ error: await res.text() }, 502);
+
+	const data = await res.json<{
+		aggregations: {
+			by_account: {
+				buckets: { key: number; doc_count: number; success: { doc_count: number } }[];
+			};
+		};
+	}>();
+	const buckets = data.aggregations?.by_account?.buckets ?? [];
+
+	const emails = new Map<number, string | null>();
+	if (buckets.length) {
+		const ids = buckets.map((b) => b.key);
+		const placeholders = ids.map(() => "?").join(",");
+		const rows = await all<{ id: number; email: string | null }>(
+			c.env.DB,
+			`SELECT id, email FROM accounts WHERE id IN (${placeholders})`,
+			...ids,
+		);
+		for (const r of rows) emails.set(r.id, r.email);
+	}
+
+	const accounts: AccountAgg[] = buckets.map((b) => {
+		const total = b.doc_count;
+		const success = b.success?.doc_count ?? 0;
+		const error = total - success;
+		return {
+			account_id: b.key,
+			email: emails.get(b.key) ?? null,
+			total,
+			success,
+			error,
+			error_rate: total > 0 ? error / total : 0,
+		};
+	});
+	accounts.sort((a, b) => b.total - a.total);
+
+	const total = accounts.reduce((s, a) => s + a.total, 0);
+	const success = accounts.reduce((s, a) => s + a.success, 0);
+	return c.json({ accounts, total, success, error: total - success });
 });
