@@ -10,6 +10,12 @@ export interface ModelTokens {
 
 export function getModelPricing(raw: string): Pricing | null {
 	const m = raw.toLowerCase().replace(/-\d{8}$/, "");
+	if (m.includes("gpt")) {
+		// GPT has no separate cache-write price; cache writes bill at the input rate.
+		if (m.includes("gpt-5.4-mini")) return { input: 0.75, cacheWrite: 0.75, cacheHit: 0.075, output: 4.5 };
+		if (m.includes("gpt-5.5")) return { input: 5, cacheWrite: 5, cacheHit: 0.5, output: 30 };
+		if (m.includes("gpt-5.4")) return { input: 2.5, cacheWrite: 2.5, cacheHit: 0.25, output: 15 };
+	}
 	if (m.includes("opus")) {
 		if (m.match(/opus-4-[5678]/)) return { input: 5, cacheWrite: 6.25, cacheHit: 0.50, output: 25 };
 		if (m.includes("opus-4-1") || m === "claude-opus-4") return { input: 15, cacheWrite: 18.75, cacheHit: 1.50, output: 75 };
