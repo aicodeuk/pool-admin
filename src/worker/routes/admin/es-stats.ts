@@ -4,8 +4,8 @@ import { all } from "../../lib/db";
 export const esStatsRoutes = new Hono<{ Bindings: Env }>();
 
 function indexFor(provider: string, today: string): string | null {
-	if (provider === "claude") return `claude-${today}`;
-	if (provider === "gpt") return `request-${today}`;
+	if (provider === "claude") return `claude-${today}*`;
+	if (provider === "gpt") return `request-${today}*`;
 	return null;
 }
 
@@ -77,8 +77,8 @@ esStatsRoutes.get("/", async (c) => {
 
 	const today = new Date().toISOString().slice(0, 10);
 	const [claude, gpt] = await Promise.all([
-		queryIndex(c.env, `claude-${today}`),
-		queryIndex(c.env, `request-${today}`),
+		queryIndex(c.env, `claude-${today}*`),
+		queryIndex(c.env, `request-${today}*`),
 	]);
 
 	return c.json({ claude, gpt });
