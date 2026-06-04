@@ -86,7 +86,8 @@ esStatsRoutes.get("/", async (c) => {
 
 interface AccountAgg {
 	account_id: number;
-	email: string | null;
+	name: string | null;
+	third_party_api_url: string | null;
 	total: number;
 	success: number;
 	error: number;
@@ -140,25 +141,27 @@ esStatsRoutes.get("/accounts", async (c) => {
 	}>();
 	const buckets = data.aggregations?.by_account?.buckets ?? [];
 
-	const emails = new Map<number, string | null>();
+	const info = new Map<number, { name: string | null; third_party_api_url: string | null }>();
 	if (buckets.length) {
 		const ids = buckets.map((b) => b.key);
 		const placeholders = ids.map(() => "?").join(",");
-		const rows = await all<{ id: number; email: string | null }>(
+		const rows = await all<{ id: number; name: string | null; third_party_api_url: string | null }>(
 			c.env.DB,
-			`SELECT id, email FROM accounts WHERE id IN (${placeholders})`,
+			`SELECT id, name, third_party_api_url FROM accounts WHERE id IN (${placeholders})`,
 			...ids,
 		);
-		for (const r of rows) emails.set(r.id, r.email);
+		for (const r of rows) info.set(r.id, { name: r.name, third_party_api_url: r.third_party_api_url });
 	}
 
 	const accounts: AccountAgg[] = buckets.map((b) => {
 		const total = b.doc_count;
 		const success = b.success?.doc_count ?? 0;
 		const error = total - success;
+		const meta = info.get(b.key);
 		return {
 			account_id: b.key,
-			email: emails.get(b.key) ?? null,
+			name: meta?.name ?? null,
+			third_party_api_url: meta?.third_party_api_url ?? null,
 			total,
 			success,
 			error,

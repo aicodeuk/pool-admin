@@ -3,7 +3,8 @@ import { api } from "../lib/api";
 
 interface AccountAgg {
 	account_id: number;
-	email: string | null;
+	name: string | null;
+	third_party_api_url: string | null;
 	total: number;
 	success: number;
 	error: number;
@@ -85,7 +86,8 @@ export function AccountStats({ provider }: { provider: "claude" | "gpt" }) {
 									<thead>
 										<tr>
 											<th>account_id</th>
-											<th>邮箱</th>
+											<th>名称</th>
+											<th>API 地址</th>
 											<th style={{ textAlign: "right" }}>成功 (200)</th>
 											<th style={{ textAlign: "right" }}>错误 (非200)</th>
 											<th style={{ textAlign: "right" }}>总计</th>
@@ -96,7 +98,8 @@ export function AccountStats({ provider }: { provider: "claude" | "gpt" }) {
 										{data.accounts.map((a) => (
 											<tr key={a.account_id}>
 												<td className="mono">{a.account_id}</td>
-												<td>{a.email ?? <span className="muted">-</span>}</td>
+												<td>{a.name ?? <span className="muted">-</span>}</td>
+											<td className="mono" style={{ fontSize: 12, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.third_party_api_url ?? <span className="muted">官方</span>}</td>
 												<td style={{ textAlign: "right" }} className="mono">{a.success.toLocaleString()}</td>
 												<td style={{ textAlign: "right", color: a.error > 0 ? "#dc2626" : undefined }} className="mono">{a.error.toLocaleString()}</td>
 												<td style={{ textAlign: "right" }} className="mono">{a.total.toLocaleString()}</td>
