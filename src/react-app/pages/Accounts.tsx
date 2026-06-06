@@ -174,6 +174,14 @@ export function Accounts({ provider }: { provider: string }) {
 		reload();
 	}
 
+	// Clear all kid_mappings pointing at this account (and zero its used_count).
+	// Reuses the existing reset-used endpoint, which does exactly that.
+	async function clearMappings(account: Account) {
+		if (!confirm(`清理账号 #${account.id} 上的 kid 映射？当前绑定 ${account.kid_count} 个`)) return;
+		await api.post(`/api/admin/accounts/${account.id}/reset-used`);
+		reload();
+	}
+
 	async function testAccount(account: Account) {
 		setTestModal({ account, loading: true, result: null, error: null });
 		try {
@@ -301,6 +309,7 @@ export function Accounts({ provider }: { provider: string }) {
 							<button className="ghost" onClick={() => setEditing(a)}>编辑</button>
 							<button className="ghost" onClick={() => testAccount(a)} title="发送探活请求，成功→active，失败→problem">探活</button>
 							<button className="ghost" onClick={() => patch(a.id, { status: a.status === "paused" ? "active" : "paused" })}>{a.status === "paused" ? "启用" : "停用"}</button>
+							<button className="ghost" onClick={() => clearMappings(a)} title="删除映射到此账号的所有 kid（kid_mappings 清空，绑定 keys 归零）">清理</button>
 							<button className="ghost danger" onClick={() => remove(a.id)}>删除</button>
 						</div>
 					</div>
