@@ -45,6 +45,9 @@ export interface AccountRow {
 	third_party_api_url: string | null;
 	project: string | null;
 	keep_active: number;
+	rpm_limit: number;
+	rpm_current: number;
+	rpm_updated_at: string | null;
 	purchase_date: string | null;
 	expire_date: string | null;
 	usage_5h_pct: number | null;

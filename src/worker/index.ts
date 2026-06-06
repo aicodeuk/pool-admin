@@ -18,6 +18,7 @@ import { claudeSync, geminiSync, gptSync } from "./routes/v2/sync";
 import { refreshExpiringTokens } from "./cron/token-refresh";
 import { syncUsage } from "./cron/usage-sync";
 import { syncStatus } from "./cron/status-sync";
+import { syncRpm } from "./cron/rpm-sync";
 import { cleanupStaleMappings } from "./cron/mapping-cleanup";
 import { cleanupSyncLogs } from "./cron/sync-logs-cleanup";
 import { runJob } from "./cron/log";
@@ -60,6 +61,7 @@ export default {
 				try {
 					if (cron === "* * * * *") {
 						await runJob(env, "status_sync", () => syncStatus(env));
+						await runJob(env, "rpm_sync", () => syncRpm(env));
 					} else if (cron === "*/10 * * * *") {
 						await runJob(env, "token_refresh", () => refreshExpiringTokens(env));
 					} else if (cron === "*/30 * * * *") {

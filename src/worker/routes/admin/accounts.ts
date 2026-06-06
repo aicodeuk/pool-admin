@@ -188,7 +188,7 @@ accountRoutes.patch("/:id{[0-9]+}", async (c) => {
 		"proxy_id", "account_level", "user_id", "multiplier", "tier", "quality_tier",
 		"total_capacity", "used_count", "status", "status_reason",
 		"is_third_party", "third_party_api_url", "project",
-		"purchase_date", "expire_date", "priority", "keep_active",
+		"purchase_date", "expire_date", "priority", "keep_active", "rpm_limit",
 	] as const;
 
 	const sets: string[] = [];

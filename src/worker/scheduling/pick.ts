@@ -23,6 +23,10 @@ type AccountWithProxy = AccountRow & {
 
 const ACCT_SELECT = `a.*, p.id AS px_id, p.host AS px_host, p.port AS px_port, p.username AS px_user, p.password AS px_pass, p.scheme AS px_scheme`;
 const PROXY_JOIN = `LEFT JOIN proxies p ON a.proxy_id = p.id AND p.is_active = 1`;
+// RPM gate for NEW assignments only: skip an account once its measured RPM hits
+// its configured cap. rpm_limit = 0 means unlimited. Warm-cache reuse paths do
+// NOT apply this, so already-mapped kids keep their account.
+const RPM_OK = `AND (a.rpm_limit = 0 OR a.rpm_current < a.rpm_limit)`;
 
 
 interface PickOpts {
@@ -246,7 +250,7 @@ async function findAccountByGroup(
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
 		 WHERE a.provider = ? AND a.status = 'active' AND a.deleted_at IS NULL
 		   AND EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id = a.id AND ag.group_name = ?)
-		   ${tierClause} ${excludeClause} ${qualityTierClause(userTier, "a")}
+		   ${RPM_OK} ${tierClause} ${excludeClause} ${qualityTierClause(userTier, "a")}
 		 ORDER BY ${qualityTierOrder(userTier, "a")}a.account_level DESC, RANDOM() * (a.priority + 1) DESC LIMIT 1`,
 		provider,
 		groupName,
@@ -269,7 +273,7 @@ async function findSharedAvailable(
 		   AND NOT EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id = a.id)
 		   AND a.is_third_party = 0
 		   AND a.available_count > 0
-		   ${tierClause} ${excludeClause} ${qualityTierClause(userTier, "a")}
+		   ${RPM_OK} ${tierClause} ${excludeClause} ${qualityTierClause(userTier, "a")}
 		 ORDER BY ${qualityTierOrder(userTier, "a")}RANDOM() * (a.priority + 1) DESC LIMIT 1`,
 		provider,
 	);
@@ -281,7 +285,7 @@ async function findThirdPartyFallback(db: DB, provider: Provider, userTier: numb
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
 		 WHERE a.provider = ? AND a.is_third_party = 1 AND a.status = 'active' AND a.deleted_at IS NULL
 		   AND NOT EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id = a.id)
-		   ${qualityTierClause(userTier, "a")}
+		   ${RPM_OK} ${qualityTierClause(userTier, "a")}
 		 ORDER BY ${qualityTierOrder(userTier, "a")}RANDOM() LIMIT 1`,
 		provider,
 	);
@@ -478,7 +482,7 @@ export async function listAvailableShared(
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
 		 WHERE a.provider = ? AND a.status = 'active' AND a.deleted_at IS NULL
 		   AND NOT EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id = a.id)
-		   ${tierClause} ${qualityTierClause(userTier, "a")}
+		   ${RPM_OK} ${tierClause} ${qualityTierClause(userTier, "a")}
 		 ${userTier != null ? "ORDER BY a.quality_tier DESC" : ""}`,
 		provider,
 	);

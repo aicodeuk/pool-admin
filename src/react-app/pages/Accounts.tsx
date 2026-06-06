@@ -29,6 +29,8 @@ interface Account {
 	created_at: string;
 	third_party_api_url: string | null;
 	keep_active: number;
+	rpm_limit: number;
+	rpm_current: number;
 }
 
 // Raw row as returned by the API: groups come back as a comma-joined string.
@@ -45,6 +47,39 @@ function groupBadgeClass(name: string): string {
 	if (name.startsWith("channel_")) return "badge channel";
 	if (name.startsWith("org_")) return "badge org";
 	return "badge normal";
+}
+
+// Quick-edit RPM cap on a card: shows live RPM and an editable limit (0 = 不限).
+// Commits on blur / Enter only when the value actually changed.
+function RpmCell({ account, onPatch }: { account: Account; onPatch: (rpm_limit: number) => void }) {
+	const [v, setV] = useState(String(account.rpm_limit ?? 0));
+	useEffect(() => { setV(String(account.rpm_limit ?? 0)); }, [account.rpm_limit]);
+
+	function commit() {
+		const n = Math.max(0, Math.trunc(Number(v) || 0));
+		if (n !== (account.rpm_limit ?? 0)) onPatch(n);
+		else setV(String(account.rpm_limit ?? 0));
+	}
+
+	const over = account.rpm_limit > 0 && account.rpm_current >= account.rpm_limit;
+	return (
+		<div className="row" style={{ gap: 6, fontSize: 12 }} title="RPM = 每分钟请求数；上限 0 表示不限制，超限后新请求会分配其他账号">
+			<span className="muted">RPM</span>
+			<span>当前 <b style={{ color: over ? "#b91c1c" : undefined }}>{account.rpm_current ?? 0}</b></span>
+			<span className="muted">上限</span>
+			<input
+				type="number"
+				min="0"
+				step="1"
+				value={v}
+				style={{ width: 64 }}
+				onChange={(e) => setV(e.target.value)}
+				onBlur={commit}
+				onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+			/>
+			{(account.rpm_limit ?? 0) === 0 && <span className="muted" style={{ fontSize: 11 }}>不限</span>}
+		</div>
+	);
 }
 
 export function Accounts({ provider }: { provider: string }) {
@@ -212,14 +247,7 @@ export function Accounts({ provider }: { provider: string }) {
 							</div>
 						)}
 
-						<label className="row" style={{ gap: 6, fontSize: 12 }}>
-							<input
-								type="checkbox"
-								checked={a.keep_active === 1}
-								onChange={() => patch(a.id, { keep_active: a.keep_active === 1 ? 0 : 1 })}
-							/>
-							<span className="muted" title="勾选后即使账号有问题也不会被下线">不下线</span>
-						</label>
+						<RpmCell account={a} onPatch={(rpm_limit) => patch(a.id, { rpm_limit })} />
 
 						<div className="row account-card-actions" style={{ gap: 4 }}>
 							<button className="ghost" onClick={() => setEditing(a)}>编辑</button>
@@ -368,6 +396,8 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 		total_capacity: account.total_capacity,
 		expire_date: account.expire_date ?? "",
 		proxy_id: account.proxy_id as number | null,
+		rpm_limit: account.rpm_limit ?? 0,
+		keep_active: account.keep_active === 1,
 	});
 	const [groups, setGroups] = useState<string[]>(account.groups);
 	const [groupInput, setGroupInput] = useState("");
@@ -400,6 +430,8 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 			total_capacity: Number(form.total_capacity),
 			expire_date: form.expire_date || null,
 			proxy_id: form.proxy_id,
+			rpm_limit: Math.max(0, Math.trunc(Number(form.rpm_limit) || 0)),
+			keep_active: form.keep_active ? 1 : 0,
 		});
 		onSaved();
 	}
@@ -456,6 +488,15 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 				<div className="field"><label>积分倍率</label><input type="number" step="0.1" value={form.multiplier} onChange={(e) => setForm({ ...form, multiplier: Number(e.target.value) })} /></div>
 				<div className="field"><label>优先级</label><input type="number" min="0" value={form.priority} onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })} /></div>
 				<div className="field"><label>总容量</label><input type="number" value={form.total_capacity} onChange={(e) => setForm({ ...form, total_capacity: Number(e.target.value) })} /></div>
+				<div className="field"><label>RPM 上限（每分钟请求数，0 = 不限；超限后新请求分配其他账号。当前实时 {account.rpm_current ?? 0}）</label>
+					<input type="number" min="0" step="1" value={form.rpm_limit} onChange={(e) => setForm({ ...form, rpm_limit: Number(e.target.value) })} />
+				</div>
+				<div className="field">
+					<label className="row" style={{ gap: 8 }}>
+						<input type="checkbox" style={{ width: "auto" }} checked={form.keep_active} onChange={(e) => setForm({ ...form, keep_active: e.target.checked })} />
+						<span>不下线（勾选后即使账号有问题也保持 active，不会被自动下线）</span>
+					</label>
+				</div>
 				<div className="field"><label>到期日 (YYYY-MM-DD)</label><input value={form.expire_date} onChange={(e) => setForm({ ...form, expire_date: e.target.value })} /></div>
 				<div className="field"><label>代理</label>
 					<select value={form.proxy_id ?? ""} onChange={(e) => setForm({ ...form, proxy_id: e.target.value ? Number(e.target.value) : null })}>
