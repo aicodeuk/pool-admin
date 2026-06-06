@@ -180,11 +180,11 @@ export function Accounts({ provider }: { provider: string }) {
 								onChange={() => toggleSelect(a.id)}
 							/>
 							<span className="mono muted">#{a.id}</span>
-							<span className="account-card-email" title={a.email ?? undefined}>{a.email || "—"}</span>
+							<span className="account-card-email" title={a.name ?? undefined}>{a.name || "—"}</span>
 							<span className={`badge ${a.status}`} title={a.last_test_response ?? a.status_reason ?? undefined} style={{ marginLeft: "auto" }}>{a.status}</span>
 						</div>
 
-						{a.name && <div className="muted" style={{ fontSize: 12 }}>{a.name}</div>}
+						{a.email && <div className="muted" style={{ fontSize: 12 }}>{a.email}</div>}
 
 						<div className="account-card-groups">
 							{a.groups.length > 0

@@ -96,9 +96,6 @@ export function KidGroups() {
 		}
 		return Array.from(m.values()).sort((a, b) => b.count - a.count || a.group_name.localeCompare(b.group_name));
 	})();
-	// Look up a group's bound-key count by (provider, group_name) — used to show
-	// the same per-group count on each range rule, keyed by its group name.
-	const countByGroup = new Map(summary.map((s) => [`${s.provider}__${s.group_name}`, s.count]));
 
 	return (
 		<>
@@ -205,7 +202,7 @@ export function KidGroups() {
 				<table>
 					<thead>
 						<tr>
-							<th>kid 起</th><th>kid 止</th><th>provider</th><th>组名</th><th>类型</th><th>该组 key 数</th>
+							<th>kid 起</th><th>kid 止</th><th>provider</th><th>组名</th><th>类型</th><th>覆盖 key 数</th>
 							<th>priority</th><th>备注</th><th>创建时间</th><th>操作</th>
 						</tr>
 					</thead>
@@ -220,7 +217,7 @@ export function KidGroups() {
 								<td><span className="badge">{r.provider}</span></td>
 								<td className="mono">{r.group_name}</td>
 								<td><span className={`badge ${kindOf(r.group_name)}`}>{kindOf(r.group_name)}</span></td>
-								<td><b>{countByGroup.get(`${r.provider}__${r.group_name}`) ?? 0}</b></td>
+								<td><b>{r.kid_to - r.kid_from + 1}</b></td>
 								<td>{r.priority}</td>
 								<td className="muted">{r.note ?? "—"}</td>
 								<td className="mono">{r.created_at.slice(0, 10)}</td>
