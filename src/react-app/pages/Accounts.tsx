@@ -371,11 +371,13 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 	});
 	const [groups, setGroups] = useState<string[]>(account.groups);
 	const [groupInput, setGroupInput] = useState("");
+	const [knownGroups, setKnownGroups] = useState<string[]>([]);
 	const [proxies, setProxies] = useState<ProxyOption[]>([]);
 
 	useEffect(() => {
 		api.get<{ items: ProxyOption[] }>("/api/admin/proxies").then((r) => setProxies(r.items));
-	}, []);
+		api.get<{ groups: string[] }>(`/api/admin/accounts/groups?provider=${account.provider}`).then((r) => setKnownGroups(r.groups));
+	}, [account.provider]);
 
 	function addGroup() {
 		const name = groupInput.trim().replace(/,$/, "").trim();
@@ -418,16 +420,30 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 						))}
 						<input
 							className="tag-input"
+							list="known-groups"
 							value={groupInput}
-							placeholder={groups.length ? "继续添加…" : "输入组名，回车添加"}
-							onChange={(e) => setGroupInput(e.target.value)}
+							placeholder={groups.length ? "选择已有 / 输入新组别…" : "点击从已有组别选择，或输入新组别"}
+							onChange={(e) => {
+								const v = e.target.value;
+								// Picking an existing group from the dropdown commits it immediately.
+								if (knownGroups.includes(v)) {
+									if (!groups.includes(v)) setGroups([...groups, v]);
+									setGroupInput("");
+								} else {
+									setGroupInput(v);
+								}
+							}}
 							onKeyDown={(e) => {
 								if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addGroup(); }
 								if (e.key === "Backspace" && !groupInput && groups.length) removeGroup(groups[groups.length - 1]);
 							}}
 							onBlur={addGroup}
 						/>
+						<datalist id="known-groups">
+							{knownGroups.filter((g) => !groups.includes(g)).map((g) => <option key={g} value={g} />)}
+						</datalist>
 					</div>
+					<span className="muted" style={{ fontSize: 11 }}>下拉可选历史组别；要新建直接输入后回车。</span>
 				</div>
 				<div className="field"><label>tier (套餐档)</label>
 					<select value={form.tier} onChange={(e) => setForm({ ...form, tier: e.target.value })}>

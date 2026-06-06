@@ -75,6 +75,30 @@ accountRoutes.get("/", async (c) => {
 	return c.json({ items: rows, total: total?.n ?? 0, limit, offset });
 });
 
+// Distinct group names ever used — for the edit-modal dropdown so admins can
+// pick a previously-entered group instead of retyping (avoids typos / mismatches).
+// Unions account groups with the kid-side bindings so the suggestions also cover
+// groups that have kids bound but no account yet.
+accountRoutes.get("/groups", async (c) => {
+	const provider = c.req.query("provider");
+	const filtered = provider != null && PROVIDERS.includes(provider as Provider);
+	const sql = filtered
+		? `SELECT DISTINCT group_name FROM (
+		     SELECT ag.group_name FROM account_groups ag JOIN accounts a ON a.id = ag.account_id WHERE a.provider = ? AND a.deleted_at IS NULL
+		     UNION SELECT group_name FROM kid_groups WHERE provider = ?
+		     UNION SELECT group_name FROM kid_group_ranges WHERE provider = ?
+		   ) WHERE group_name IS NOT NULL AND group_name != '' ORDER BY group_name`
+		: `SELECT DISTINCT group_name FROM (
+		     SELECT group_name FROM account_groups
+		     UNION SELECT group_name FROM kid_groups
+		     UNION SELECT group_name FROM kid_group_ranges
+		   ) WHERE group_name IS NOT NULL AND group_name != '' ORDER BY group_name`;
+	const rows = filtered
+		? await all<{ group_name: string }>(c.env.DB, sql, provider, provider, provider)
+		: await all<{ group_name: string }>(c.env.DB, sql);
+	return c.json({ groups: rows.map((r) => r.group_name) });
+});
+
 accountRoutes.get("/:id{[0-9]+}", async (c) => {
 	const id = Number(c.req.param("id"));
 	const row = await one<AccountRow>(c.env.DB, `SELECT * FROM accounts WHERE id = ?`, id);

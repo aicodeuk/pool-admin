@@ -85,6 +85,18 @@ export function KidGroups() {
 		reloadRanges();
 	}
 
+	// Per-group rollup: how many API keys (kids) are bound to each group.
+	const summary = (() => {
+		const m = new Map<string, { provider: Provider; group_name: string; count: number }>();
+		for (const r of items) {
+			const key = `${r.provider}__${r.group_name}`;
+			const cur = m.get(key);
+			if (cur) cur.count++;
+			else m.set(key, { provider: r.provider, group_name: r.group_name, count: 1 });
+		}
+		return Array.from(m.values()).sort((a, b) => b.count - a.count || a.group_name.localeCompare(b.group_name));
+	})();
+
 	return (
 		<>
 			<h2>Kid 分组绑定</h2>
@@ -94,6 +106,28 @@ export function KidGroups() {
 					每条规则只对所选 provider 生效；同一个 kid 可对 claude/gpt/gemini 各设一条
 				</span>
 			</div>
+
+			<h3 style={{ margin: "8px 0" }}>组别汇总（每组绑定的 API key 数）</h3>
+			<div className="card" style={{ padding: 0 }}>
+				<table>
+					<thead><tr><th>组</th><th>类型</th><th>provider</th><th>绑定 API key 数</th></tr></thead>
+					<tbody>
+						{summary.length === 0 && (
+							<tr><td colSpan={4} className="muted" style={{ textAlign: "center", padding: 16 }}>暂无绑定</td></tr>
+						)}
+						{summary.map((s) => (
+							<tr key={`${s.provider}-${s.group_name}`}>
+								<td className="mono">{s.group_name}</td>
+								<td><span className={`badge ${kindOf(s.group_name)}`}>{kindOf(s.group_name)}</span></td>
+								<td><span className="badge">{s.provider}</span></td>
+								<td><b>{s.count}</b></td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			</div>
+
+			<h3 style={{ margin: "16px 0 8px" }}>绑定明细</h3>
 			<div className="card" style={{ padding: 0 }}>
 				<table>
 					<thead><tr><th>kid</th><th>provider</th><th>组</th><th>类型</th><th>备注</th><th>更新时间</th><th>操作</th></tr></thead>
