@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { OnboardPanel } from "./Onboard";
 
 interface Account {
 	id: number;
 	provider: string;
 	email: string | null;
 	name: string | null;
-	group_name: string | null;
+	groups: string[];
 	tier: string;
 	quality_tier: number;
 	status: string;
@@ -30,6 +31,22 @@ interface Account {
 	keep_active: number;
 }
 
+// Raw row as returned by the API: groups come back as a comma-joined string.
+type AccountRaw = Omit<Account, "groups"> & { groups_csv: string | null };
+
+function parseGroups(csv: string | null): string[] {
+	if (!csv) return [];
+	return csv.split(",").map((g) => g.trim()).filter(Boolean);
+}
+
+// Group name prefix decides its badge color (matches scheduling semantics):
+// channel_* = strict binding, org_* = fallback-able, anything else = normal.
+function groupBadgeClass(name: string): string {
+	if (name.startsWith("channel_")) return "badge channel";
+	if (name.startsWith("org_")) return "badge org";
+	return "badge normal";
+}
+
 export function Accounts({ provider }: { provider: string }) {
 	const [items, setItems] = useState<Account[]>([]);
 	const [total, setTotal] = useState(0);
@@ -37,9 +54,9 @@ export function Accounts({ provider }: { provider: string }) {
 	const [loading, setLoading] = useState(false);
 	const [editing, setEditing] = useState<Account | null>(null);
 	const [testModal, setTestModal] = useState<{ account: Account; loading: boolean; result: TestResult | null; error: string | null } | null>(null);
-	const [inlineEdit, setInlineEdit] = useState<{ id: number; field: string; value: string } | null>(null);
 	const [selected, setSelected] = useState<Set<number>>(new Set());
 	const [bulkModal, setBulkModal] = useState<{ value: string } | null>(null);
+	const [adding, setAdding] = useState(false);
 
 	const reload = useCallback(async () => {
 		setLoading(true);
@@ -49,13 +66,14 @@ export function Accounts({ provider }: { provider: string }) {
 			if (filters.status) params.set("status", filters.status);
 			if (filters.q) params.set("q", filters.q);
 			if (filters.quality_tier) params.set("quality_tier", filters.quality_tier);
-			const r = await api.get<{ items: Account[]; total: number }>(`/api/admin/accounts?${params}`);
-			setItems(r.items);
+			const r = await api.get<{ items: AccountRaw[]; total: number }>(`/api/admin/accounts?${params}`);
+			const mapped = r.items.map((a) => ({ ...a, groups: parseGroups(a.groups_csv) }));
+			setItems(mapped);
 			setTotal(r.total);
 			// drop selections of rows that disappeared
 			setSelected((prev) => {
 				const next = new Set<number>();
-				for (const a of r.items) if (prev.has(a.id)) next.add(a.id);
+				for (const a of mapped) if (prev.has(a.id)) next.add(a.id);
 				return next;
 			});
 		} finally {
@@ -69,20 +87,6 @@ export function Accounts({ provider }: { provider: string }) {
 
 	async function patch(id: number, body: Partial<Account>) {
 		await api.patch(`/api/admin/accounts/${id}`, body);
-		reload();
-	}
-
-	function startInline(id: number, field: string, value: string) {
-		setInlineEdit({ id, field, value });
-	}
-
-	async function commitInline(override?: { id: number; field: string; value: string }) {
-		const edit = override ?? inlineEdit;
-		if (!edit) return;
-		setInlineEdit(null);
-		const numFields = ["multiplier", "priority", "quality_tier"];
-		const coerced = numFields.includes(edit.field) ? Number(edit.value) : (edit.value || null);
-		await api.patch(`/api/admin/accounts/${edit.id}`, { [edit.field]: coerced });
 		reload();
 	}
 
@@ -147,6 +151,7 @@ export function Accounts({ provider }: { provider: string }) {
 					onChange={(e) => setFilters({ ...filters, q: e.target.value })}
 				/>
 				<button onClick={reload} disabled={loading}>刷新</button>
+				<button className="primary" onClick={() => setAdding(true)}>+ 添加</button>
 				{selected.size > 0 && (
 					<button className="primary" onClick={() => setBulkModal({ value: "0" })}>
 						批量改 quality_tier ({selected.size})
@@ -154,191 +159,95 @@ export function Accounts({ provider }: { provider: string }) {
 				)}
 			</div>
 
+			<div className="row" style={{ marginBottom: 12, fontSize: 13 }}>
+				<label className="row" style={{ gap: 6, cursor: "pointer" }}>
+					<input
+						type="checkbox"
+						checked={items.length > 0 && selected.size === items.length}
+						onChange={toggleSelectAll}
+					/>
+					<span className="muted">全选 / 取消（已选 {selected.size}）</span>
+				</label>
+			</div>
 
-			<div className="card" style={{ padding: 0, overflow: "auto" }}>
-				<table>
-					<thead>
-						<tr>
-							<th style={{ width: 28 }}>
-								<input
-									type="checkbox"
-									checked={items.length > 0 && selected.size === items.length}
-									onChange={toggleSelectAll}
-									title="全选/取消"
-								/>
-							</th>
-							<th>ID</th><th>邮箱 / 备注</th><th>组</th><th>tier</th><th>QT</th><th>状态</th>
-							<th>绑定keys</th><th>×</th><th>优先级</th><th>API地址</th><th>添加时间</th><th>不下线</th><th>操作</th>
-						</tr>
-					</thead>
-					<tbody>
-						{items.map((a) => (
-							<tr key={a.id}>
-								<td>
-									<input
-										type="checkbox"
-										checked={selected.has(a.id)}
-										onChange={() => toggleSelect(a.id)}
-									/>
-								</td>
-								<td>{a.id}</td>
-								<td>
-									<div>{a.email}</div>
-									{inlineEdit?.id === a.id && inlineEdit.field === "name" ? (
-										<input
-											autoFocus
-											className="inline-input"
-											value={inlineEdit.value}
-											onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-											onBlur={() => commitInline()}
-											onKeyDown={(e) => { if (e.key === "Enter") commitInline(); if (e.key === "Escape") setInlineEdit(null); }}
-										/>
-									) : (
-										<div
-											className="muted inline-cell"
-											style={{ fontSize: 11 }}
-											onClick={() => startInline(a.id, "name", a.name ?? "")}
-										>
-											{a.name || <span style={{ opacity: 0.35 }}>+ 备注</span>}
-										</div>
-									)}
-								</td>
-								<td>
-									{inlineEdit?.id === a.id && inlineEdit.field === "group_name" ? (
-										<input
-											autoFocus
-											className="inline-input"
-											value={inlineEdit.value}
-											onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-											onBlur={() => commitInline()}
-											onKeyDown={(e) => { if (e.key === "Enter") commitInline(); if (e.key === "Escape") setInlineEdit(null); }}
-										/>
-									) : (
-										<span className="inline-cell" onClick={() => startInline(a.id, "group_name", a.group_name ?? "")}>
-											{a.group_name ?? <span className="muted">-</span>}
-										</span>
-									)}
-								</td>
-								<td>
-									{inlineEdit?.id === a.id && inlineEdit.field === "tier" ? (
-										<select
-											autoFocus
-											className="inline-input"
-											value={inlineEdit.value}
-											onChange={(e) => commitInline({ id: a.id, field: "tier", value: e.target.value })}
-											onBlur={() => setInlineEdit(null)}
-										>
-											<option value="free">free</option>
-											<option value="pro">pro</option>
-											<option value="max">max</option>
-										</select>
-									) : (
-										<span className="inline-cell" onClick={() => startInline(a.id, "tier", a.tier)}>{a.tier}</span>
-									)}
-								</td>
-								<td title="quality_tier（用户 user_tier ≥ 此值才能用）">
-									{inlineEdit?.id === a.id && inlineEdit.field === "quality_tier" ? (
-										<input
-											autoFocus
-											type="number"
-											min="0"
-											max="10"
-											step="1"
-											className="inline-input"
-											style={{ width: 48 }}
-											value={inlineEdit.value}
-											onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-											onBlur={() => commitInline()}
-											onKeyDown={(e) => { if (e.key === "Enter") commitInline(); if (e.key === "Escape") setInlineEdit(null); }}
-										/>
-									) : (
-										<span className="inline-cell" onClick={() => startInline(a.id, "quality_tier", String(a.quality_tier ?? 0))}>{a.quality_tier ?? 0}</span>
-									)}
-								</td>
-								<td>
-									<span className={`badge ${a.status}`} title={a.last_test_response ?? undefined}>{a.status}</span>
-									{a.status_reason && (
-										<div
-											className="muted"
-											style={{ fontSize: 10, marginTop: 2, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default" }}
-											title={a.last_test_response ?? a.status_reason}
-										>
-											{a.status_reason}
-										</div>
-									)}
-								</td>
-								<td>{a.kid_count}</td>
-								<td>
-									{inlineEdit?.id === a.id && inlineEdit.field === "multiplier" ? (
-										<input
-											autoFocus
-											type="number"
-											step="0.1"
-											className="inline-input"
-											style={{ width: 64 }}
-											value={inlineEdit.value}
-											onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-											onBlur={() => commitInline()}
-											onKeyDown={(e) => { if (e.key === "Enter") commitInline(); if (e.key === "Escape") setInlineEdit(null); }}
-										/>
-									) : (
-										<span className="inline-cell" onClick={() => startInline(a.id, "multiplier", String(a.multiplier))}>{a.multiplier}</span>
-									)}
-								</td>
-								<td>
-									{inlineEdit?.id === a.id && inlineEdit.field === "priority" ? (
-										<input
-											autoFocus
-											type="number"
-											min="0"
-											className="inline-input"
-											style={{ width: 48 }}
-											value={inlineEdit.value}
-											onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-											onBlur={() => commitInline()}
-											onKeyDown={(e) => { if (e.key === "Enter") commitInline(); if (e.key === "Escape") setInlineEdit(null); }}
-										/>
-									) : (
-										<span className="inline-cell" onClick={() => startInline(a.id, "priority", String(a.priority ?? 0))}>{a.priority ?? 0}</span>
-									)}
-								</td>
-								<td>
-									{a.third_party_api_url ? (
-										<span
-											className="mono truncate"
-											style={{ cursor: "pointer", maxWidth: 160, display: "inline-block", fontSize: 11 }}
-											title={a.third_party_api_url}
-											onClick={() => navigator.clipboard.writeText(a.third_party_api_url!)}
-										>
-											{a.third_party_api_url}
-										</span>
-									) : <span className="muted">-</span>}
-								</td>
-								<td className="mono">{a.created_at.slice(0, 10)}</td>
-								<td>
-									<input
-										type="checkbox"
-										checked={a.keep_active === 1}
-										onChange={() => patch(a.id, { keep_active: a.keep_active === 1 ? 0 : 1 })}
-										title="勾选后，即使账号有问题也不会被下线，保持 active 状态"
-									/>
-								</td>
-								<td>
-									<div className="row" style={{ gap: 4 }}>
-										<button className="ghost" onClick={() => setEditing(a)}>编辑</button>
-										<button className="ghost" onClick={() => testAccount(a)} title="发送探活请求，成功→active，失败→problem">探活</button>
-										<button className="ghost" onClick={() => patch(a.id, { status: a.status === "paused" ? "active" : "paused" })}>{a.status === "paused" ? "启用" : "停用"}</button>
-										<button className="ghost danger" onClick={() => remove(a.id)}>删除</button>
-									</div>
-								</td>
-							</tr>
-						))}
-					</tbody>
-				</table>
+			<div className="account-grid">
+				{items.map((a) => (
+					<div className={`account-card${selected.has(a.id) ? " selected" : ""}`} key={a.id}>
+						<div className="account-card-head">
+							<input
+								type="checkbox"
+								checked={selected.has(a.id)}
+								onChange={() => toggleSelect(a.id)}
+							/>
+							<span className="mono muted">#{a.id}</span>
+							<span className="account-card-email" title={a.email ?? undefined}>{a.email || "—"}</span>
+							<span className={`badge ${a.status}`} title={a.last_test_response ?? a.status_reason ?? undefined} style={{ marginLeft: "auto" }}>{a.status}</span>
+						</div>
+
+						{a.name && <div className="muted" style={{ fontSize: 12 }}>{a.name}</div>}
+
+						<div className="account-card-groups">
+							{a.groups.length > 0
+								? a.groups.map((g) => <span key={g} className={groupBadgeClass(g)}>{g}</span>)
+								: <span className="muted" style={{ fontSize: 12 }}>共享池（无组）</span>}
+						</div>
+
+						<div className="account-card-meta">
+							<span>套餐 <b>{a.tier}</b></span>
+							<span title="quality_tier">QT <b>{a.quality_tier ?? 0}</b></span>
+							<span>倍率 <b>{a.multiplier}</b></span>
+							<span>优先级 <b>{a.priority ?? 0}</b></span>
+							<span>绑定 keys <b>{a.kid_count}</b></span>
+							<span className="mono">{a.created_at.slice(0, 10)}</span>
+						</div>
+
+						{a.third_party_api_url && (
+							<div
+								className="mono truncate"
+								style={{ cursor: "pointer", fontSize: 11 }}
+								title={`点击复制：${a.third_party_api_url}`}
+								onClick={() => navigator.clipboard.writeText(a.third_party_api_url!)}
+							>
+								{a.third_party_api_url}
+							</div>
+						)}
+
+						<label className="row" style={{ gap: 6, fontSize: 12 }}>
+							<input
+								type="checkbox"
+								checked={a.keep_active === 1}
+								onChange={() => patch(a.id, { keep_active: a.keep_active === 1 ? 0 : 1 })}
+							/>
+							<span className="muted" title="勾选后即使账号有问题也不会被下线">不下线</span>
+						</label>
+
+						<div className="row account-card-actions" style={{ gap: 4 }}>
+							<button className="ghost" onClick={() => setEditing(a)}>编辑</button>
+							<button className="ghost" onClick={() => testAccount(a)} title="发送探活请求，成功→active，失败→problem">探活</button>
+							<button className="ghost" onClick={() => patch(a.id, { status: a.status === "paused" ? "active" : "paused" })}>{a.status === "paused" ? "启用" : "停用"}</button>
+							<button className="ghost danger" onClick={() => remove(a.id)}>删除</button>
+						</div>
+					</div>
+				))}
+				{items.length === 0 && !loading && <div className="muted">暂无账号</div>}
 			</div>
 
 			{editing && <EditModal account={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
 			{testModal && <TestModal state={testModal} onClose={() => setTestModal(null)} />}
+			{adding && (
+				<div className="modal-back" onClick={() => setAdding(false)}>
+					<div className="modal" style={{ width: "min(680px, 92vw)" }} onClick={(e) => e.stopPropagation()}>
+						<div className="row" style={{ justifyContent: "space-between" }}>
+							<h3 style={{ margin: 0 }}>添加账号</h3>
+							<button className="ghost" onClick={() => setAdding(false)}>关闭</button>
+						</div>
+						<div className="muted" style={{ fontSize: 12, margin: "8px 0 16px" }}>
+							上号后默认进共享池（无组），可在卡片「编辑」里设置组别（可多个）。
+						</div>
+						<OnboardPanel provider={provider} onDone={reload} />
+					</div>
+				</div>
+			)}
 			{bulkModal && (
 				<div className="modal-back" onClick={() => setBulkModal(null)}>
 					<div className="modal" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
@@ -452,7 +361,6 @@ interface ProxyOption {
 function EditModal({ account, onClose, onSaved }: { account: Account; onClose: () => void; onSaved: () => void }) {
 	const [form, setForm] = useState({
 		name: account.name ?? "",
-		group_name: account.group_name ?? "",
 		tier: account.tier,
 		quality_tier: account.quality_tier ?? 0,
 		multiplier: account.multiplier,
@@ -461,16 +369,28 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 		expire_date: account.expire_date ?? "",
 		proxy_id: account.proxy_id as number | null,
 	});
+	const [groups, setGroups] = useState<string[]>(account.groups);
+	const [groupInput, setGroupInput] = useState("");
 	const [proxies, setProxies] = useState<ProxyOption[]>([]);
 
 	useEffect(() => {
 		api.get<{ items: ProxyOption[] }>("/api/admin/proxies").then((r) => setProxies(r.items));
 	}, []);
 
+	function addGroup() {
+		const name = groupInput.trim().replace(/,$/, "").trim();
+		if (name && !groups.includes(name)) setGroups([...groups, name]);
+		setGroupInput("");
+	}
+
+	function removeGroup(name: string) {
+		setGroups(groups.filter((g) => g !== name));
+	}
+
 	async function save() {
 		await api.patch(`/api/admin/accounts/${account.id}`, {
 			name: form.name || null,
-			group_name: form.group_name || null,
+			groups,
 			tier: form.tier,
 			quality_tier: Math.trunc(Number(form.quality_tier)),
 			multiplier: Number(form.multiplier),
@@ -487,7 +407,28 @@ function EditModal({ account, onClose, onSaved }: { account: Account; onClose: (
 			<div className="modal" onClick={(e) => e.stopPropagation()}>
 				<h3>编辑 #{account.id}</h3>
 				<div className="field"><label>备注</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-				<div className="field"><label>组名</label><input value={form.group_name} onChange={(e) => setForm({ ...form, group_name: e.target.value })} /></div>
+				<div className="field">
+					<label>组别（可多个；channel_* 严格绑定，org_* 可回落，其他普通）</label>
+					<div className="tag-editor">
+						{groups.map((g) => (
+							<span key={g} className={`${groupBadgeClass(g)} tag-chip`}>
+								{g}
+								<button type="button" className="tag-chip-x" onClick={() => removeGroup(g)} aria-label="移除">×</button>
+							</span>
+						))}
+						<input
+							className="tag-input"
+							value={groupInput}
+							placeholder={groups.length ? "继续添加…" : "输入组名，回车添加"}
+							onChange={(e) => setGroupInput(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addGroup(); }
+								if (e.key === "Backspace" && !groupInput && groups.length) removeGroup(groups[groups.length - 1]);
+							}}
+							onBlur={addGroup}
+						/>
+					</div>
+				</div>
 				<div className="field"><label>tier (套餐档)</label>
 					<select value={form.tier} onChange={(e) => setForm({ ...form, tier: e.target.value })}>
 						<option value="free">free</option><option value="pro">pro</option><option value="max">max</option>

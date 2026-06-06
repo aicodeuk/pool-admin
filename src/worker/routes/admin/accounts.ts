@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { all, exec, one, run } from "../../lib/db";
+import type { DB } from "../../lib/db";
 import { audit } from "../../lib/audit";
 import { addDays, nowDate, nowDateTime } from "../../lib/time";
 import type { AccountRow, AccountStatus, Provider } from "../../lib/types";
@@ -34,7 +35,7 @@ accountRoutes.get("/", async (c) => {
 		where.push("a.status != 'terminated'");
 	}
 	if (groupName) {
-		where.push("a.group_name = ?");
+		where.push("EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id = a.id AND ag.group_name = ?)");
 		args.push(groupName);
 	}
 	if (isThirdParty === "1" || isThirdParty === "0") {
@@ -54,10 +55,11 @@ accountRoutes.get("/", async (c) => {
 		args.push(like, like, like);
 	}
 
-	const rows = await all<AccountRow & { proxy_label: string | null; kid_count: number }>(
+	const rows = await all<AccountRow & { proxy_label: string | null; kid_count: number; groups_csv: string | null }>(
 		c.env.DB,
 		`SELECT a.*, (p.host || ':' || p.port) AS proxy_label,
-		        (SELECT COUNT(*) FROM kid_mappings km WHERE km.account_id = a.id) AS kid_count
+		        (SELECT COUNT(*) FROM kid_mappings km WHERE km.account_id = a.id) AS kid_count,
+		        (SELECT GROUP_CONCAT(ag.group_name) FROM account_groups ag WHERE ag.account_id = a.id) AS groups_csv
 		 FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id
 		 WHERE ${where.join(" AND ")}
 		 ORDER BY CASE WHEN a.status = 'active' THEN 0 ELSE 1 END, a.priority DESC, a.id DESC LIMIT ? OFFSET ?`,
@@ -80,8 +82,31 @@ accountRoutes.get("/:id{[0-9]+}", async (c) => {
 	return c.json(row);
 });
 
+// Normalize a `groups` payload (string[] or comma-separated string) into a
+// deduped, trimmed list of group names.
+function normalizeGroups(input: unknown): string[] {
+	const raw = Array.isArray(input)
+		? input
+		: typeof input === "string"
+			? input.split(",")
+			: [];
+	const out: string[] = [];
+	for (const g of raw) {
+		const name = String(g).trim();
+		if (name && !out.includes(name)) out.push(name);
+	}
+	return out;
+}
+
+async function replaceGroups(db: DB, accountId: number, groups: string[]): Promise<void> {
+	await run(db, `DELETE FROM account_groups WHERE account_id = ?`, accountId);
+	for (const name of groups) {
+		await run(db, `INSERT OR IGNORE INTO account_groups (account_id, group_name) VALUES (?, ?)`, accountId, name);
+	}
+}
+
 accountRoutes.post("/", async (c) => {
-	const body = await c.req.json<Partial<AccountRow>>();
+	const body = await c.req.json<Partial<AccountRow> & { groups?: unknown }>();
 	if (!body.provider || !PROVIDERS.includes(body.provider)) {
 		return c.json({ error: "provider required (claude|gpt|gemini)" }, 400);
 	}
@@ -118,18 +143,25 @@ accountRoutes.post("/", async (c) => {
 		purchase,
 		expire,
 	);
+	const groups = normalizeGroups(body.groups ?? body.group_name);
+	if (groups.length > 0) await replaceGroups(c.env.DB, r.lastRowId, groups);
 	await audit(c.env.DB, "account.create", { type: "account", id: r.lastRowId }, body);
 	return c.json({ id: r.lastRowId });
 });
 
 accountRoutes.patch("/:id{[0-9]+}", async (c) => {
 	const id = Number(c.req.param("id"));
-	const body = await c.req.json<Partial<AccountRow>>();
+	const body = await c.req.json<Partial<AccountRow> & { groups?: unknown }>();
+
+	// Multi-group is stored in account_groups, not accounts.group_name.
+	if ("groups" in body) {
+		await replaceGroups(c.env.DB, id, normalizeGroups(body.groups));
+	}
 
 	const editable = [
 		"email", "name",
 		"access_token", "access_token_expires_at", "refresh_token", "refresh_token_expires_at",
-		"proxy_id", "account_level", "group_name", "user_id", "multiplier", "tier", "quality_tier",
+		"proxy_id", "account_level", "user_id", "multiplier", "tier", "quality_tier",
 		"total_capacity", "used_count", "status", "status_reason",
 		"is_third_party", "third_party_api_url", "project",
 		"purchase_date", "expire_date", "priority", "keep_active",

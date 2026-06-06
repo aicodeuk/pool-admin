@@ -207,7 +207,8 @@ async function tryGroupAssign(
 			const existingAccount = await one<AccountWithProxy>(
 				db,
 				`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
-				 WHERE a.id = ? AND a.group_name = ? AND a.status = 'active' AND a.deleted_at IS NULL
+				 WHERE a.id = ? AND a.status = 'active' AND a.deleted_at IS NULL
+				   AND EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id = a.id AND ag.group_name = ?)
 				   ${qualityTierClause(userTier, "a")}`,
 				existingMapping.account_id,
 				groupName,
@@ -243,7 +244,8 @@ async function findAccountByGroup(
 	return one<AccountWithProxy>(
 		db,
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
-		 WHERE a.provider = ? AND a.group_name = ? AND a.status = 'active' AND a.deleted_at IS NULL
+		 WHERE a.provider = ? AND a.status = 'active' AND a.deleted_at IS NULL
+		   AND EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id = a.id AND ag.group_name = ?)
 		   ${tierClause} ${excludeClause} ${qualityTierClause(userTier, "a")}
 		 ORDER BY ${qualityTierOrder(userTier, "a")}a.account_level DESC, RANDOM() * (a.priority + 1) DESC LIMIT 1`,
 		provider,
@@ -264,7 +266,7 @@ async function findSharedAvailable(
 		db,
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
 		 WHERE a.provider = ? AND a.status = 'active' AND a.deleted_at IS NULL
-		   AND (a.group_name IS NULL OR a.group_name = '')
+		   AND NOT EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id = a.id)
 		   AND a.is_third_party = 0
 		   AND a.available_count > 0
 		   ${tierClause} ${excludeClause} ${qualityTierClause(userTier, "a")}
@@ -278,7 +280,7 @@ async function findThirdPartyFallback(db: DB, provider: Provider, userTier: numb
 		db,
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
 		 WHERE a.provider = ? AND a.is_third_party = 1 AND a.status = 'active' AND a.deleted_at IS NULL
-		   AND (a.group_name IS NULL OR a.group_name = '')
+		   AND NOT EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id = a.id)
 		   ${qualityTierClause(userTier, "a")}
 		 ORDER BY ${qualityTierOrder(userTier, "a")}RANDOM() LIMIT 1`,
 		provider,
@@ -475,7 +477,7 @@ export async function listAvailableShared(
 		db,
 		`SELECT ${ACCT_SELECT} FROM accounts a ${PROXY_JOIN}
 		 WHERE a.provider = ? AND a.status = 'active' AND a.deleted_at IS NULL
-		   AND (a.group_name IS NULL OR a.group_name = '')
+		   AND NOT EXISTS (SELECT 1 FROM account_groups ag WHERE ag.account_id = a.id)
 		   ${tierClause} ${qualityTierClause(userTier, "a")}
 		 ${userTier != null ? "ORDER BY a.quality_tier DESC" : ""}`,
 		provider,

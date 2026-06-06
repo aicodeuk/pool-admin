@@ -130,6 +130,36 @@ tr:hover td { background: #fafbfc; }
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 .field label { font-size: 12px; color: #6b7280; }
 
+/* Account pool cards */
+.account-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.account-card {
+	background: #ffffff;
+	border: 1px solid #e5e7eb;
+	border-radius: 8px;
+	padding: 14px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.account-card:hover { box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04); }
+.account-card.selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+.account-card-head { display: flex; align-items: center; gap: 8px; }
+.account-card-head input[type="checkbox"] { width: auto; flex: 0 0 auto; }
+.account-card-email { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-card-groups { display: flex; flex-wrap: wrap; gap: 4px; min-height: 20px; }
+.account-card-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: #6b7280; }
+.account-card-meta b { color: #1f2937; font-weight: 600; }
+.account-card-actions { margin-top: 4px; border-top: 1px solid #f1f3f5; padding-top: 8px; }
+
+/* Multi-group tag editor (in edit modal) */
+.tag-editor { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 8px; }
+.tag-editor:focus-within { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+.tag-chip { display: inline-flex; align-items: center; gap: 4px; }
+.tag-chip-x { border: none; background: transparent; padding: 0 2px; margin: 0; font-size: 14px; line-height: 1; color: inherit; cursor: pointer; }
+.tag-chip-x:hover { color: #b91c1c; background: transparent; border: none; }
+.tag-editor .tag-input { border: none; outline: none; box-shadow: none; padding: 2px; flex: 1 1 80px; min-width: 80px; width: auto; }
+.tag-editor .tag-input:focus { border: none; box-shadow: none; }
+
 .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 2px solid #e5e7eb; }
 .tabs button { border: none; border-radius: 0; background: transparent; padding: 8px 18px; color: #6b7280; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -2px; }
 .tabs button:hover { color: #1f2937; border-color: transparent; }

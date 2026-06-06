@@ -63,7 +63,7 @@ function parseApiKeyInput(text: string): Array<{ key: string; proxy: string | nu
 
 // ── Claude OAuth tab ───────────────────────────────────────────────────────
 
-function OAuthTab() {
+function OAuthTab({ onDone }: { onDone?: () => void }) {
 	const [proxy, setProxy] = useState("");
 	const [name, setName] = useState("");
 	const [stage, setStage] = useState<"init" | "await-code" | "done">("init");
@@ -99,6 +99,7 @@ function OAuthTab() {
 			);
 			setResult(r);
 			setStage("done");
+			onDone?.();
 		} catch (e) {
 			setError((e as Error).message);
 		} finally {
@@ -169,7 +170,7 @@ function OAuthTab() {
 
 // ── Official API Key tab ───────────────────────────────────────────────────
 
-function ApiKeyTab() {
+function ApiKeyTab({ onDone }: { onDone?: () => void }) {
 	const [text, setText] = useState("");
 	const [name, setName] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -191,6 +192,7 @@ function ApiKeyTab() {
 				},
 			);
 			setResults({ added: r.added, skipped: r.skipped, errors: r.errors, items: r.results });
+			onDone?.();
 		} catch (e) {
 			setError((e as Error).message);
 		} finally {
@@ -295,9 +297,9 @@ function parseRelayInput(text: string): RelayEntry[] {
 	return entries;
 }
 
-function RelayTab() {
+function RelayTab({ provider: initialProvider, onDone }: { provider?: string; onDone?: () => void }) {
 	const [text, setText] = useState("");
-	const [provider, setProvider] = useState("claude");
+	const [provider, setProvider] = useState(initialProvider ?? "claude");
 	const [name, setName] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -315,6 +317,7 @@ function RelayTab() {
 				{ entries: parsed, provider, name: name.trim() || undefined },
 			);
 			setResults({ added: r.added, skipped: r.skipped, errors: r.errors, items: r.results });
+			onDone?.();
 		} catch (e) {
 			setError((e as Error).message);
 		} finally {
@@ -397,20 +400,32 @@ function RelayTab() {
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-export function Onboard() {
-	const [tab, setTab] = useState<"oauth" | "apikey" | "relay">("oauth");
+// Reusable onboarding panel — the tabbed form shared by the standalone 上号 page
+// and the 「添加」 popup on the account-pool pages.
+// `provider` preselects the default tab and the relay provider dropdown.
+// `onDone` fires after each successful onboard (used to refresh the pool list).
+export function OnboardPanel({ provider, onDone }: { provider?: string; onDone?: () => void }) {
+	const [tab, setTab] = useState<"oauth" | "apikey" | "relay">(provider === "gpt" ? "relay" : "oauth");
 
 	return (
 		<>
-			<h2>上号</h2>
 			<div className="tabs">
 				<button className={tab === "oauth" ? "active" : ""} onClick={() => setTab("oauth")}>Claude OAuth</button>
 				<button className={tab === "apikey" ? "active" : ""} onClick={() => setTab("apikey")}>官方 API Key</button>
 				<button className={tab === "relay" ? "active" : ""} onClick={() => setTab("relay")}>第三方中转</button>
 			</div>
-			{tab === "oauth" && <OAuthTab />}
-			{tab === "apikey" && <ApiKeyTab />}
-			{tab === "relay" && <RelayTab />}
+			{tab === "oauth" && <OAuthTab onDone={onDone} />}
+			{tab === "apikey" && <ApiKeyTab onDone={onDone} />}
+			{tab === "relay" && <RelayTab provider={provider} onDone={onDone} />}
+		</>
+	);
+}
+
+export function Onboard() {
+	return (
+		<>
+			<h2>上号</h2>
+			<OnboardPanel />
 		</>
 	);
 }

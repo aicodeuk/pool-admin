@@ -22,7 +22,8 @@ kidMappingRoutes.get("/", async (c) => {
 		all(
 			c.env.DB,
 			`SELECT m.id, m.kid, m.provider, m.account_id, m.created_at, m.updated_at,
-			        a.email, a.group_name, a.tier
+			        a.email, a.tier,
+			        (SELECT GROUP_CONCAT(ag.group_name) FROM account_groups ag WHERE ag.account_id = a.id) AS group_name
 			 FROM kid_mappings m LEFT JOIN accounts a ON a.id = m.account_id
 			 ${where.length ? "WHERE " + where.join(" AND ") : ""}
 			 ORDER BY m.updated_at DESC LIMIT 500`,

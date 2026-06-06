@@ -166,7 +166,7 @@ onboardRoutes.post("/complete", async (c) => {
 			proxy_id, status, total_capacity, used_count,
 			account_level, multiplier,
 			purchase_date, expire_date
-		) VALUES ('claude', ?, ?, ?, ?, ?, ?, 'paused', 10, 0, 1, 4.0, ?, ?)`,
+		) VALUES ('claude', ?, ?, ?, ?, ?, ?, 'paused', 10, 0, 1, 0.1, ?, ?)`,
 		finalEmail,
 		body.name ?? null,
 		access,
@@ -274,7 +274,7 @@ onboardRoutes.post("/api-key", async (c) => {
 				account_level, multiplier,
 				purchase_date, expire_date
 			) VALUES ('claude', ?, ?, ?, '2099-01-01 00:00:00', 1, 'https://api.anthropic.com',
-			          ?, 'paused', 10, 0, 1, 4.0, ?, ?)`,
+			          ?, 'paused', 10, 0, 1, 0.1, ?, ?)`,
 			email,
 			body.name ?? entry.name ?? null,
 			key,
@@ -347,7 +347,7 @@ onboardRoutes.post("/relay", async (c) => {
 				account_level, multiplier,
 				purchase_date, expire_date
 			) VALUES (?, ?, ?, ?, '2099-01-01 00:00:00', 1, ?,
-			          ?, 'paused', 10, 0, 1, 4.0, ?, ?)`,
+			          ?, 'paused', 10, 0, 1, 0.1, ?, ?)`,
 			body.provider,
 			email,
 			body.name ?? entry.name ?? null,
