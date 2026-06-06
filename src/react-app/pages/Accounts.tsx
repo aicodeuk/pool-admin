@@ -92,6 +92,24 @@ export function Accounts({ provider }: { provider: string }) {
 	const [selected, setSelected] = useState<Set<number>>(new Set());
 	const [bulkModal, setBulkModal] = useState<{ value: string } | null>(null);
 	const [adding, setAdding] = useState(false);
+	const [tab, setTab] = useState<"active" | "inactive">("active");
+	// account_ids seen in today's ES index. null = ES unavailable/empty → don't
+	// filter (show everything as active), per the fallback requirement.
+	const [activeIds, setActiveIds] = useState<Set<number> | null>(null);
+
+	const loadActiveIds = useCallback(async () => {
+		try {
+			const r = await api.get<{ accounts?: { account_id: number }[]; unconfigured?: boolean }>(
+				`/api/admin/es-stats/accounts?provider=${provider}`,
+			);
+			if (r.unconfigured || !r.accounts || r.accounts.length === 0) { setActiveIds(null); return; }
+			setActiveIds(new Set(r.accounts.map((a) => a.account_id)));
+		} catch {
+			setActiveIds(null); // ES down → fall back to showing all
+		}
+	}, [provider]);
+
+	useEffect(() => { loadActiveIds(); }, [loadActiveIds]);
 
 	const reload = useCallback(async () => {
 		setLoading(true);
@@ -133,8 +151,11 @@ export function Accounts({ provider }: { provider: string }) {
 		});
 	}
 
-	function toggleSelectAll() {
-		setSelected((prev) => prev.size === items.length ? new Set() : new Set(items.map((a) => a.id)));
+	function toggleSelectAll(visible: Account[]) {
+		setSelected((prev) => {
+			const allSelected = visible.length > 0 && visible.every((a) => prev.has(a.id));
+			return allSelected ? new Set() : new Set(visible.map((a) => a.id));
+		});
 	}
 
 	async function applyBulkQualityTier() {
@@ -164,9 +185,21 @@ export function Accounts({ provider }: { provider: string }) {
 		}
 	}
 
+	// Partition into active (seen in today's ES index) vs inactive. When ES is
+	// unavailable (activeIds === null) everything stays in the active tab.
+	const haveEs = activeIds !== null;
+	const activeItems = haveEs ? items.filter((a) => activeIds!.has(a.id)) : items;
+	const inactiveItems = haveEs ? items.filter((a) => !activeIds!.has(a.id)) : [];
+	const shown = tab === "active" ? activeItems : inactiveItems;
+
 	return (
 		<>
-			<h2>{provider === "claude" ? "Claude 号池" : "GPT 号池"} ({total})</h2>
+			<h2>
+				{provider === "claude" ? "Claude 号池" : "GPT 号池"} ({total})
+				<span className="muted" style={{ fontSize: 14, fontWeight: 400, marginLeft: 12 }}>
+					总 RPM <b style={{ color: "#111827" }}>{items.reduce((s, a) => s + (a.rpm_current ?? 0), 0)}</b>
+				</span>
+			</h2>
 			<div className="toolbar">
 				<select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
 					<option value="">全部状态</option>
@@ -185,7 +218,7 @@ export function Accounts({ provider }: { provider: string }) {
 					value={filters.q}
 					onChange={(e) => setFilters({ ...filters, q: e.target.value })}
 				/>
-				<button onClick={reload} disabled={loading}>刷新</button>
+				<button onClick={() => { reload(); loadActiveIds(); }} disabled={loading}>刷新</button>
 				<button className="primary" onClick={() => setAdding(true)}>+ 添加</button>
 				{selected.size > 0 && (
 					<button className="primary" onClick={() => setBulkModal({ value: "0" })}>
@@ -194,19 +227,34 @@ export function Accounts({ provider }: { provider: string }) {
 				)}
 			</div>
 
+			<div className="tabs">
+				<button className={tab === "active" ? "active" : ""} onClick={() => setTab("active")}>
+					活跃账号 ({activeItems.length})
+				</button>
+				<button className={tab === "inactive" ? "active" : ""} onClick={() => setTab("inactive")}>
+					不活跃 ({inactiveItems.length})
+				</button>
+			</div>
+
+			{!haveEs && (
+				<div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+					ES 暂不可用或当天无记录，已显示全部账号。
+				</div>
+			)}
+
 			<div className="row" style={{ marginBottom: 12, fontSize: 13 }}>
 				<label className="row" style={{ gap: 6, cursor: "pointer" }}>
 					<input
 						type="checkbox"
-						checked={items.length > 0 && selected.size === items.length}
-						onChange={toggleSelectAll}
+						checked={shown.length > 0 && shown.every((a) => selected.has(a.id))}
+						onChange={() => toggleSelectAll(shown)}
 					/>
 					<span className="muted">全选 / 取消（已选 {selected.size}）</span>
 				</label>
 			</div>
 
 			<div className="account-grid">
-				{items.map((a) => (
+				{shown.map((a) => (
 					<div className={`account-card${selected.has(a.id) ? " selected" : ""}`} key={a.id}>
 						<div className="account-card-head">
 							<input
@@ -257,7 +305,7 @@ export function Accounts({ provider }: { provider: string }) {
 						</div>
 					</div>
 				))}
-				{items.length === 0 && !loading && <div className="muted">暂无账号</div>}
+				{shown.length === 0 && !loading && <div className="muted">{tab === "active" ? "暂无活跃账号" : "暂无不活跃账号"}</div>}
 			</div>
 
 			{editing && <EditModal account={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
