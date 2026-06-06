@@ -28,8 +28,10 @@ export async function syncRpm(env: Env): Promise<{ measured: number; cleared: nu
 			method: "POST",
 			headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
 			body: JSON.stringify({
+				// Docs use `start_time` (UTC, e.g. 2026-06-06T14:41:06Z) as the request
+				// timestamp — there is no @timestamp field. `now-2m` is UTC in ES, matching.
 				size: 0,
-				query: { range: { "@timestamp": { gte: "now-2m" } } },
+				query: { range: { start_time: { gte: "now-2m" } } },
 				aggs: { by_account: { terms: { field: "account_id", size: 5000 } } },
 			}),
 		});
