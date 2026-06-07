@@ -223,3 +223,91 @@ esStatsRoutes.get("/accounts", async (c) => {
 	const success = accounts.reduce((s, a) => s + a.success, 0);
 	return c.json({ accounts, total, success, error: total - success });
 });
+
+interface KeyAgg {
+	api_key_id: number;
+	count: number;
+	models: ModelAgg[];
+}
+
+// Top API keys by request count today (Claude), with per-model token sums for cost.
+esStatsRoutes.get("/risk", async (c) => {
+	if (!c.env.ES_URL) return c.json({ keys: [], unconfigured: true });
+
+	const today = new Date().toISOString().slice(0, 10);
+	const index = `claude-${today}*`;
+	const { ES_URL, ES_USERNAME, ES_PASSWORD } = c.env;
+	const auth = btoa(`${ES_USERNAME}:${ES_PASSWORD}`);
+
+	let res: Response;
+	try {
+		res = await fetch(`${ES_URL}/${index}/_search`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Basic ${auth}`,
+			},
+			body: JSON.stringify({
+				size: 0,
+				aggs: {
+					by_key: {
+						terms: { field: "api_key_id", size: 50, order: { _count: "desc" } },
+						aggs: {
+							by_model: {
+								terms: { field: "model.keyword", size: 50 },
+								aggs: {
+									input_tokens: { sum: { field: "input_tokens" } },
+									output_tokens: { sum: { field: "output_tokens" } },
+									cache_creation_tokens: { sum: { field: "cache_creation_input_tokens" } },
+									cache_read_tokens: { sum: { field: "cache_read_input_tokens" } },
+								},
+							},
+						},
+					},
+				},
+			}),
+		});
+	} catch (e) {
+		return c.json({ error: String(e) }, 502);
+	}
+
+	if (res.status === 404) return c.json({ keys: [] });
+	if (!res.ok) return c.json({ error: await res.text() }, 502);
+
+	const data = await res.json<{
+		aggregations: {
+			by_key: {
+				buckets: {
+					key: number;
+					doc_count: number;
+					by_model: {
+						buckets: {
+							key: string;
+							doc_count: number;
+							input_tokens: { value: number };
+							output_tokens: { value: number };
+							cache_creation_tokens: { value: number };
+							cache_read_tokens: { value: number };
+						}[];
+					};
+				}[];
+			};
+		};
+	}>();
+	const buckets = data.aggregations?.by_key?.buckets ?? [];
+
+	const keys: KeyAgg[] = buckets.map((b) => ({
+		api_key_id: b.key,
+		count: b.doc_count,
+		models: (b.by_model?.buckets ?? []).map((m) => ({
+			model: m.key,
+			count: m.doc_count,
+			input_tokens: m.input_tokens.value,
+			output_tokens: m.output_tokens.value,
+			cache_creation_tokens: m.cache_creation_tokens.value,
+			cache_read_tokens: m.cache_read_tokens.value,
+		})),
+	}));
+
+	return c.json({ keys });
+});
