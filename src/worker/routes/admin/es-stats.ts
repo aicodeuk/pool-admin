@@ -315,3 +315,75 @@ esStatsRoutes.get("/risk", async (c) => {
 
 	return c.json({ keys });
 });
+
+interface SharedSession {
+	session: string;
+	key_count: number;
+	requests: number;
+	keys: { api_key_id: number; count: number }[];
+}
+
+// Sessions that appear under more than one api_key_id today (Claude) — one
+// person spreading traffic across multiple keys / sub-accounts.
+esStatsRoutes.get("/shared-sessions", async (c) => {
+	if (!c.env.ES_URL) return c.json({ sessions: [], unconfigured: true });
+
+	const today = new Date().toISOString().slice(0, 10);
+	const index = `claude-${today}*`;
+	const { ES_URL, ES_USERNAME, ES_PASSWORD } = c.env;
+	const auth = btoa(`${ES_USERNAME}:${ES_PASSWORD}`);
+
+	let res: Response;
+	try {
+		res = await fetch(`${ES_URL}/${index}/_search`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Basic ${auth}`,
+			},
+			body: JSON.stringify({
+				size: 0,
+				query: { bool: { must_not: [{ term: { "session.keyword": "" } }] } },
+				aggs: {
+					by_session: {
+						terms: { field: "session.keyword", size: 200, order: { keys: "desc" } },
+						aggs: {
+							keys: { cardinality: { field: "api_key_id" } },
+							key_list: { terms: { field: "api_key_id", size: 50, order: { _count: "desc" } } },
+						},
+					},
+				},
+			}),
+		});
+	} catch (e) {
+		return c.json({ error: String(e) }, 502);
+	}
+
+	if (res.status === 404) return c.json({ sessions: [] });
+	if (!res.ok) return c.json({ error: await res.text() }, 502);
+
+	const data = await res.json<{
+		aggregations: {
+			by_session: {
+				buckets: {
+					key: string;
+					doc_count: number;
+					keys: { value: number };
+					key_list: { buckets: { key: number; doc_count: number }[] };
+				}[];
+			};
+		};
+	}>();
+	const buckets = data.aggregations?.by_session?.buckets ?? [];
+
+	const sessions: SharedSession[] = buckets
+		.filter((b) => (b.keys?.value ?? 0) > 1)
+		.map((b) => ({
+			session: b.key,
+			key_count: b.keys.value,
+			requests: b.doc_count,
+			keys: (b.key_list?.buckets ?? []).map((k) => ({ api_key_id: k.key, count: k.doc_count })),
+		}));
+
+	return c.json({ sessions });
+});

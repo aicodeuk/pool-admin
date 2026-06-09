@@ -11,6 +11,7 @@ const NAV: NavItem[] = [
 	{ id: "claude-stats", label: "Claude 调用统计" },
 	{ id: "gpt-stats", label: "GPT 调用统计" },
 	{ id: "risk", label: "风险分析" },
+	{ id: "shared-sessions", label: "多号检测" },
 	{ id: "claude-accounts", label: "Claude 号池" },
 	{ id: "gpt-accounts", label: "GPT 号池" },
 	{ id: "proxies", label: "代理" },

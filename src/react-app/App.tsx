@@ -4,6 +4,7 @@ import { Login } from "./pages/Login";
 import { Dashboard } from "./pages/Dashboard";
 import { AccountStats } from "./pages/AccountStats";
 import { Risk } from "./pages/Risk";
+import { SharedSessions } from "./pages/SharedSessions";
 import { Accounts } from "./pages/Accounts";
 import { Proxies } from "./pages/Proxies";
 import { KidGroups } from "./pages/KidGroups";
@@ -50,6 +51,7 @@ function App() {
 			{page === "claude-stats" && <AccountStats provider="claude" />}
 			{page === "gpt-stats" && <AccountStats provider="gpt" />}
 			{page === "risk" && <Risk />}
+			{page === "shared-sessions" && <SharedSessions />}
 			{page === "claude-accounts" && <Accounts provider="claude" />}
 			{page === "gpt-accounts" && <Accounts provider="gpt" />}
 			{page === "proxies" && <Proxies />}
