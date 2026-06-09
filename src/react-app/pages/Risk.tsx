@@ -10,6 +10,7 @@ interface ModelAgg extends ModelTokens {
 interface KeyAgg {
 	api_key_id: number;
 	count: number;
+	sessions: number;
 	models: ModelAgg[];
 }
 
@@ -46,6 +47,7 @@ export function Risk() {
 	const rows = data.keys.map((k) => ({ k, cost: keyCost(k) }));
 	const totalCost = rows.reduce((s, r) => s + r.cost, 0);
 	const totalReq = rows.reduce((s, r) => s + r.k.count, 0);
+	const totalSessions = rows.reduce((s, r) => s + r.k.sessions, 0);
 
 	return (
 		<>
@@ -78,6 +80,7 @@ export function Risk() {
 											<th style={{ textAlign: "right", width: 48 }}>#</th>
 											<th>api_key_id</th>
 											<th style={{ textAlign: "right" }}>请求次数</th>
+											<th style={{ textAlign: "right" }}>会话数</th>
 											<th style={{ textAlign: "right" }}>Input</th>
 											<th style={{ textAlign: "right" }}>Cache Write</th>
 											<th style={{ textAlign: "right" }}>Cache Read</th>
@@ -91,6 +94,7 @@ export function Risk() {
 												<td style={{ textAlign: "right", color: i < 3 ? "#dc2626" : "#6b7280", fontWeight: i < 3 ? 700 : 400 }}>{i + 1}</td>
 												<td className="mono">{k.api_key_id}</td>
 												<td style={{ textAlign: "right", fontWeight: 600 }}>{k.count.toLocaleString()}</td>
+												<td style={{ textAlign: "right" }} className="mono">{k.sessions.toLocaleString()}</td>
 												<td style={{ textAlign: "right" }} className="mono">{fmtTokens(sumTok(k, "input_tokens"))}</td>
 												<td style={{ textAlign: "right" }} className="mono">{fmtTokens(sumTok(k, "cache_creation_tokens"))}</td>
 												<td style={{ textAlign: "right" }} className="mono">{fmtTokens(sumTok(k, "cache_read_tokens"))}</td>
@@ -103,6 +107,7 @@ export function Risk() {
 										<tr style={{ borderTop: "1px solid #e2e8f0" }}>
 											<td colSpan={2} style={{ textAlign: "right", color: "#6b7280", paddingTop: 8 }}>合计</td>
 											<td style={{ textAlign: "right", fontWeight: 700, paddingTop: 8 }}>{totalReq.toLocaleString()}</td>
+											<td style={{ textAlign: "right", paddingTop: 8 }} className="mono">{totalSessions.toLocaleString()}</td>
 											<td colSpan={4} />
 											<td style={{ textAlign: "right", fontWeight: 700, paddingTop: 8 }}>${totalCost.toFixed(4)}</td>
 										</tr>

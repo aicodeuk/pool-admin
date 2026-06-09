@@ -227,6 +227,7 @@ esStatsRoutes.get("/accounts", async (c) => {
 interface KeyAgg {
 	api_key_id: number;
 	count: number;
+	sessions: number;
 	models: ModelAgg[];
 }
 
@@ -253,6 +254,7 @@ esStatsRoutes.get("/risk", async (c) => {
 					by_key: {
 						terms: { field: "api_key_id", size: 50, order: { _count: "desc" } },
 						aggs: {
+							sessions: { cardinality: { field: "session.keyword" } },
 							by_model: {
 								terms: { field: "model.keyword", size: 50 },
 								aggs: {
@@ -280,6 +282,7 @@ esStatsRoutes.get("/risk", async (c) => {
 				buckets: {
 					key: number;
 					doc_count: number;
+					sessions: { value: number };
 					by_model: {
 						buckets: {
 							key: string;
@@ -299,6 +302,7 @@ esStatsRoutes.get("/risk", async (c) => {
 	const keys: KeyAgg[] = buckets.map((b) => ({
 		api_key_id: b.key,
 		count: b.doc_count,
+		sessions: b.sessions?.value ?? 0,
 		models: (b.by_model?.buckets ?? []).map((m) => ({
 			model: m.key,
 			count: m.doc_count,
