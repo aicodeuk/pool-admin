@@ -5,10 +5,11 @@ import { runJob } from "../../cron/log";
 import { syncStatus } from "../../cron/status-sync";
 import { refreshExpiringTokens } from "../../cron/token-refresh";
 import { syncUsage } from "../../cron/usage-sync";
+import { blockSessionAbusers } from "../../cron/abuse-block";
 
 export const cronRoutes = new Hono<{ Bindings: Env }>();
 
-const JOBS = ["status_sync", "token_refresh", "usage_sync"] as const;
+const JOBS = ["status_sync", "token_refresh", "usage_sync", "session_abuse_block"] as const;
 type Job = (typeof JOBS)[number];
 
 cronRoutes.get("/", async (c) => {
@@ -73,6 +74,7 @@ cronRoutes.post("/:job/run", async (c) => {
 		if (job === "status_sync") result = await runJob(c.env, job, () => syncStatus(c.env));
 		else if (job === "token_refresh") result = await runJob(c.env, job, () => refreshExpiringTokens(c.env));
 		else if (job === "usage_sync") result = await runJob(c.env, job, () => syncUsage(c.env));
+		else if (job === "session_abuse_block") result = await runJob(c.env, job, () => blockSessionAbusers(c.env));
 	} finally {
 		// Restore disabled state if it was disabled before
 		if (cfg && cfg.enabled === 0) {

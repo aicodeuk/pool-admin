@@ -21,6 +21,7 @@ import { syncStatus } from "./cron/status-sync";
 import { syncRpm } from "./cron/rpm-sync";
 import { cleanupStaleMappings } from "./cron/mapping-cleanup";
 import { cleanupSyncLogs } from "./cron/sync-logs-cleanup";
+import { blockSessionAbusers } from "./cron/abuse-block";
 import { runJob } from "./cron/log";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -64,6 +65,7 @@ export default {
 						await runJob(env, "rpm_sync", () => syncRpm(env));
 					} else if (cron === "*/10 * * * *") {
 						await runJob(env, "token_refresh", () => refreshExpiringTokens(env));
+						await runJob(env, "session_abuse_block", () => blockSessionAbusers(env));
 					} else if (cron === "*/30 * * * *") {
 						await runJob(env, "usage_sync", () => syncUsage(env));
 						await runJob(env, "mapping_cleanup", () => cleanupStaleMappings(env));
