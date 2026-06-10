@@ -16,6 +16,7 @@ import { audit } from "../lib/audit";
 import { nowDateTime } from "../lib/time";
 
 const THRESHOLD = 10; // strictly more than 10 keys per session
+const MIN_KID = 30000099; // never auto-block kids below this id (reserved range)
 
 interface SessionBucket {
 	key: string;
@@ -69,6 +70,7 @@ export async function blockSessionAbusers(env: Env): Promise<{ flagged: number; 
 	const kidToCount = new Map<number, number>(); // kid → key_count of the worst session it appeared in
 	for (const b of flagged) {
 		for (const k of b.key_list?.buckets ?? []) {
+			if (k.key < MIN_KID) continue; // exclude reserved low key ids
 			const prev = kidToCount.get(k.key) ?? 0;
 			if (b.keys.value > prev) kidToCount.set(k.key, b.keys.value);
 		}
