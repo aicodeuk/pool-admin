@@ -15,7 +15,7 @@ import { one, run } from "../lib/db";
 import { audit } from "../lib/audit";
 import { nowDateTime } from "../lib/time";
 
-const THRESHOLD = 10; // strictly more than 10 keys per session
+const THRESHOLD = 5; // strictly more than 10 keys per session
 const MIN_KID = 30000099; // never auto-block kids below this id (reserved range)
 
 interface SessionBucket {
